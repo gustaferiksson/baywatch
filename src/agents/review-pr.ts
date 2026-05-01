@@ -53,6 +53,7 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
         agent: claudeCode(config.agent.model),
         sandbox: podman({
             imageName: SANDBOX_IMAGE,
+            selinuxLabel: false,
             env: loadAgentEnv(),
             mounts: [{ hostPath: REVIEWS_HOST_DIR, sandboxPath: REVIEWS_SANDBOX_DIR }],
         }),

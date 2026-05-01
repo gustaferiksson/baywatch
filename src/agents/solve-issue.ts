@@ -50,7 +50,7 @@ export async function solveIssue(opts: {
 
     const result = await run({
         agent: claudeCode(config.agent.model),
-        sandbox: podman({ imageName: SANDBOX_IMAGE, env: loadAgentEnv() }),
+        sandbox: podman({ imageName: SANDBOX_IMAGE, selinuxLabel: false, env: loadAgentEnv() }),
         cwd: prep.repoPath,
         promptFile: PROMPT_PATH,
         promptArgs: {
