@@ -1,5 +1,6 @@
+import { promises as fs } from "node:fs"
 import path from "node:path"
-import { claudeCode, run } from "@ai-hero/sandcastle"
+import { claudeCode, hostSessionStore, run, transferSession } from "@ai-hero/sandcastle"
 import { podman } from "@ai-hero/sandcastle/sandboxes/podman"
 
 import { createAgentClone, pushBranchToMain } from "../agentClone.ts"
@@ -80,7 +81,12 @@ export async function solveIssue(opts: {
 
     console.log(`[dev]   done: ${result.commits.length} commit(s) on ${result.branch}`)
     if (result.completionSignal) console.log(`[dev]   signal: ${result.completionSignal}`)
-    if (result.logFilePath) console.log(`[dev]   log: ${result.logFilePath}`)
+    if (result.logFilePath) {
+        console.log(`[dev]   log:   ${result.logFilePath}`)
+        console.log(`[dev]   tail:  tail -f ${result.logFilePath}`)
+    }
+
+    await migrateSessionToMainClone({ result, clone })
 
     if (result.commits.length > 0) {
         await pushBranchToMain(clone)
@@ -91,4 +97,32 @@ export async function solveIssue(opts: {
     } else {
         console.log(`[dev]   no commits — agent clone left at ${clone.path} for inspection`)
     }
+}
+
+// Move the claude-code session JSONL from `~/.claude/projects/<encoded(agent-clone)>/`
+// to `~/.claude/projects/<encoded(main-clone)>/` and rewrite `cwd` fields, so the
+// session shows up under the main project (e.g. tokens) in claude-code's history
+// and in tooling that indexes by project path.
+async function migrateSessionToMainClone(opts: {
+    result: { iterations: { sessionId?: string }[] }
+    clone: { path: string; mainClonePath: string }
+}): Promise<void> {
+    const { result, clone } = opts
+    const sessionId = result.iterations[0]?.sessionId
+    if (!sessionId) {
+        console.warn("[dev]   no sessionId returned — skipping session migration")
+        return
+    }
+    const source = hostSessionStore(clone.path)
+    const target = hostSessionStore(clone.mainClonePath)
+    await transferSession(source, target, sessionId)
+    console.log(`[dev]   session migrated → ${target.sessionFilePath(sessionId)}`)
+
+    // Remove the source JSONL (and its now-empty project dir) so ~/.claude/projects/
+    // doesn't accumulate entries for short-lived agent clones.
+    const sourcePath = source.sessionFilePath(sessionId)
+    await fs.unlink(sourcePath)
+    const sourceDir = path.dirname(sourcePath)
+    const remaining = await fs.readdir(sourceDir)
+    if (remaining.length === 0) await fs.rmdir(sourceDir)
 }
