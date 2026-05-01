@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { reviewPR } from "./agents/review-pr.ts"
 import { solveIssue } from "./agents/solve-issue.ts"
-import { loadConfig } from "./config.ts"
+import { BAYWATCH_ROOT, loadConfig } from "./config.ts"
 import { discoverIssues, discoverPRs } from "./discovery.ts"
 import { installSpecs } from "./install-specs.ts"
 import { formatAge, formatDuration, listRecentLogs } from "./logs.ts"
@@ -18,6 +18,7 @@ COMMANDS
   dev [--dry-run] [--only] [--auto] [--limit N] [REF ...]     Run the dev agent (no args + TTY → picker)
   review [--dry-run] [--only] [--auto] [--limit N] [REF ...]  Run the review agent (no args + TTY → picker)
   logs [<id>] [--follow] [--running] [--json] [--limit N]     Recent agent run logs (id picks one; --follow tails; --json for tooling)
+  image-build                                                 Rebuild the baywatch-agent podman image
   install-specs                                               Build & install Fig autocomplete spec
   -h, --help                                                  Show this help
 
@@ -196,6 +197,19 @@ const runReview = async (opts: RunOpts): Promise<void> => {
     for (const pr of prs) await reviewPR({ pr, config: cfg, dryRun: opts.dryRun })
 }
 
+const runImageBuild = async (): Promise<void> => {
+    const containerfile = `${BAYWATCH_ROOT}/Containerfile`
+    console.log(`Building baywatch-agent from ${containerfile}`)
+    const proc = Bun.spawn(["podman", "build", "-t", "baywatch-agent", "-f", "Containerfile", "."], {
+        cwd: BAYWATCH_ROOT,
+        stdout: "inherit",
+        stderr: "inherit",
+    })
+    const code = await proc.exited
+    if (code !== 0) throw new Error(`podman build failed (exit ${code})`)
+    console.log("✓ baywatch-agent rebuilt")
+}
+
 const runLogs = (argv: string[]): Promise<void> => {
     let follow = false
     let limit = 10
@@ -304,6 +318,9 @@ try {
             break
         case "logs":
             await runLogs(argv.slice(1))
+            break
+        case "image-build":
+            await runImageBuild()
             break
         case "install-specs":
             await installSpecs()

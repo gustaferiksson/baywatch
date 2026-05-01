@@ -159,6 +159,10 @@ const completionSpec: Fig.Spec = {
             ],
         },
         {
+            name: "image-build",
+            description: "Rebuild the baywatch-agent podman image from baywatch's Containerfile",
+        },
+        {
             name: "install-specs",
             description: "Build & install this Fig autocomplete spec to ~/.fig/autocomplete/build",
         },
