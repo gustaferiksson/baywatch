@@ -3,13 +3,11 @@ import path from "node:path"
 import { $ } from "bun"
 
 import type { BaywatchConfig } from "./config.ts"
-import { assertWorkingTreeClean } from "./safety.ts"
 
 export type PrepResult = {
     repoPath: string
-    branch: string
-    baseSha: string
     defaultBranch: string
+    installCmd: string | null
 }
 
 function detectInstallCmd(repoPath: string): string | null {
@@ -44,47 +42,31 @@ async function getOriginDefaultBranch(repoPath: string): Promise<string> {
     }
 }
 
-export async function prepRepo(opts: {
-    ownerRepo: string
-    branchName: string
-    config: BaywatchConfig
-}): Promise<PrepResult> {
-    const { ownerRepo, branchName, config } = opts
+// Gather everything the agent run needs to know about a target repo. Does NOT
+// touch the user's main checkout — no branch creation, no install on host.
+// Sandcastle's worktree + onSandboxReady install hook handles all of that.
+export async function prepRepo(opts: { ownerRepo: string; config: BaywatchConfig }): Promise<PrepResult> {
+    const { ownerRepo, config } = opts
     const repoPath = findRepoPath(ownerRepo, config.cloneRoots)
     if (!repoPath) {
         throw new Error(`No local clone found for ${ownerRepo} in any of: ${config.cloneRoots.join(", ")}`)
     }
 
-    await assertWorkingTreeClean(repoPath)
-
+    // Refresh origin so the worktree's baseBranch (origin/<default>) is current.
     await $`git -C ${repoPath} fetch origin --prune`.quiet()
 
     const override = config.repoOverrides[ownerRepo]
     const defaultBranch = override?.defaultBranch ?? (await getOriginDefaultBranch(repoPath))
-
-    await $`git -C ${repoPath} checkout -B ${branchName} origin/${defaultBranch}`.quiet()
-    const baseSha = (await $`git -C ${repoPath} rev-parse HEAD`.text()).trim()
-
     const installCmd = override?.installCmd ?? detectInstallCmd(repoPath)
-    if (installCmd) {
-        console.log(`[prep] running install: ${installCmd}  (in ${repoPath})`)
-        const proc = Bun.spawn(["sh", "-c", installCmd], {
-            cwd: repoPath,
-            stdout: "inherit",
-            stderr: "inherit",
-        })
-        const code = await proc.exited
-        if (code !== 0) throw new Error(`install failed (exit ${code}): ${installCmd}`)
-    }
 
     excludeSandcastleLocally(repoPath)
 
-    return { repoPath, branch: branchName, baseSha, defaultBranch }
+    return { repoPath, defaultBranch, installCmd }
 }
 
-// Add `.sandcastle/` to the repo's local-only ignore (`.git/info/exclude`) so the
-// metadata sandcastle drops in the worktree doesn't appear as untracked changes.
-// This is per-clone and never committed.
+// Add `.sandcastle/` to the repo's local-only ignore (`.git/info/exclude`) so
+// sandcastle's worktrees + logs don't appear as untracked changes. Per-clone,
+// never committed.
 function excludeSandcastleLocally(repoPath: string): void {
     const excludePath = path.join(repoPath, ".git", "info", "exclude")
     if (!existsSync(excludePath)) return

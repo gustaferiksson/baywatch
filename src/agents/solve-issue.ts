@@ -2,6 +2,7 @@ import path from "node:path"
 import { claudeCode, run } from "@ai-hero/sandcastle"
 import { podman } from "@ai-hero/sandcastle/sandboxes/podman"
 
+import { createAgentClone, pushBranchToMain } from "../agentClone.ts"
 import { loadAgentEnv } from "../agentEnv.ts"
 import { BAYWATCH_ROOT, type BaywatchConfig } from "../config.ts"
 import type { DiscoveredIssue } from "../discovery.ts"
@@ -41,17 +42,27 @@ export async function solveIssue(opts: {
     console.log(`[dev] ${ownerRepo}#${issue.number} → branch ${branchName}`)
 
     if (dryRun) {
-        console.log("[dev]   (dry-run) would prep repo and hand off to sandcastle")
+        console.log("[dev]   (dry-run) would prep + clone + hand off to sandcastle")
         return
     }
 
-    const prep = await prepRepo({ ownerRepo, branchName, config })
-    console.log(`[dev]   prepped: ${prep.repoPath} on ${prep.branch} @ ${prep.baseSha.slice(0, 7)}`)
+    const prep = await prepRepo({ ownerRepo, config })
+    console.log(`[dev]   default branch: ${prep.defaultBranch}`)
+
+    const clone = await createAgentClone({
+        ownerRepo,
+        mainClonePath: prep.repoPath,
+        branchName,
+        defaultBranch: prep.defaultBranch,
+    })
+    console.log(`[dev]   agent clone ready at ${clone.path}`)
+
+    const hooks = prep.installCmd ? { sandbox: { onSandboxReady: [{ command: prep.installCmd }] } } : undefined
 
     const result = await run({
         agent: claudeCode(config.agent.model),
         sandbox: podman({ imageName: SANDBOX_IMAGE, selinuxLabel: false, env: loadAgentEnv() }),
-        cwd: prep.repoPath,
+        cwd: clone.path,
         promptFile: PROMPT_PATH,
         promptArgs: {
             ISSUE_REPO: ownerRepo,
@@ -59,14 +70,25 @@ export async function solveIssue(opts: {
             ISSUE_TITLE: issue.title,
             ISSUE_BODY: issue.body || "(empty)",
             ISSUE_URL: issue.url,
-            BRANCH_NAME: prep.branch,
+            BRANCH_NAME: branchName,
             DEFAULT_BRANCH: prep.defaultBranch,
         },
         branchStrategy: { type: "head" },
+        ...(hooks ? { hooks } : {}),
         name: `issue-${issue.number}`,
     })
 
     console.log(`[dev]   done: ${result.commits.length} commit(s) on ${result.branch}`)
     if (result.completionSignal) console.log(`[dev]   signal: ${result.completionSignal}`)
     if (result.logFilePath) console.log(`[dev]   log: ${result.logFilePath}`)
+
+    if (result.commits.length > 0) {
+        await pushBranchToMain(clone)
+        console.log(`[dev]   branch ${clone.branch} fetched into ${clone.mainClonePath}`)
+        console.log(
+            `[dev]   inspect:  cd ${clone.path}   (or)   git -C ${clone.mainClonePath} checkout ${clone.branch}`
+        )
+    } else {
+        console.log(`[dev]   no commits — agent clone left at ${clone.path} for inspection`)
+    }
 }
