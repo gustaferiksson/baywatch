@@ -1,0 +1,102 @@
+{
+    "name": "baywatch-vscode",
+    "displayName": "Baywatch",
+    "description": "VS Code surface for the baywatch agent orchestrator. Talks to the `baywatch` CLI; CLI is the source of truth.",
+    "version": "0.0.1",
+    "publisher": "gustaferiksson",
+    "private": true,
+    "engines": {
+        "vscode": "^1.95.0"
+    },
+    "main": "./dist/extension.js",
+    "categories": [
+        "Other"
+    ],
+    "activationEvents": [
+        "onView:baywatch.runs",
+        "onCommand:baywatch.runDev",
+        "onCommand:baywatch.runReview",
+        "onCommand:baywatch.refreshRuns"
+    ],
+    "contributes": {
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "baywatch",
+                    "title": "Baywatch",
+                    "icon": "$(rocket)"
+                }
+            ]
+        },
+        "views": {
+            "baywatch": [
+                {
+                    "id": "baywatch.runs",
+                    "name": "Runs"
+                }
+            ]
+        },
+        "commands": [
+            {
+                "command": "baywatch.runDev",
+                "title": "Baywatch: Run dev agent",
+                "icon": "$(play)"
+            },
+            {
+                "command": "baywatch.runReview",
+                "title": "Baywatch: Run review agent",
+                "icon": "$(comment-discussion)"
+            },
+            {
+                "command": "baywatch.refreshRuns",
+                "title": "Baywatch: Refresh runs",
+                "icon": "$(refresh)"
+            },
+            {
+                "command": "baywatch.openLog",
+                "title": "Baywatch: Open run log"
+            },
+            {
+                "command": "baywatch.openClone",
+                "title": "Baywatch: Open agent clone in new window"
+            }
+        ],
+        "menus": {
+            "view/title": [
+                {
+                    "command": "baywatch.runDev",
+                    "when": "view == baywatch.runs",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "baywatch.runReview",
+                    "when": "view == baywatch.runs",
+                    "group": "navigation@2"
+                },
+                {
+                    "command": "baywatch.refreshRuns",
+                    "when": "view == baywatch.runs",
+                    "group": "navigation@3"
+                }
+            ],
+            "view/item/context": [
+                {
+                    "command": "baywatch.openClone",
+                    "when": "view == baywatch.runs && viewItem == dev-run",
+                    "group": "inline"
+                }
+            ]
+        }
+    },
+    "scripts": {
+        "build": "tsc -p .",
+        "watch": "tsc -p . --watch",
+        "package": "vsce package --no-yarn"
+    },
+    "devDependencies": {
+        "@types/node": "22.10.5",
+        "@types/vscode": "1.118.0",
+        "@vscode/vsce": "3.9.1",
+        "typescript": "6.0.3"
+    }
+}
