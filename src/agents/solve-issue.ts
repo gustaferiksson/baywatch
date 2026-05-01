@@ -5,6 +5,7 @@ import { podman } from "@ai-hero/sandcastle/sandboxes/podman"
 
 import { createAgentClone, pushBranchToMain } from "../agentClone.ts"
 import { loadAgentEnv } from "../agentEnv.ts"
+import { writeAgentSettings } from "../agentSettings.ts"
 import { BAYWATCH_ROOT, type BaywatchConfig } from "../config.ts"
 import type { DiscoveredIssue } from "../discovery.ts"
 import { prepRepo } from "../prep.ts"
@@ -58,6 +59,8 @@ export async function solveIssue(opts: {
         defaultBranch: prep.defaultBranch,
     })
     console.log(`[dev]   agent clone ready at ${clone.path}`)
+
+    writeAgentSettings({ targetDir: clone.path, config, asLocalOverride: false })
 
     const hooks = prep.installCmd ? { sandbox: { onSandboxReady: [{ command: prep.installCmd }] } } : undefined
 

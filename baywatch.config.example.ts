@@ -20,6 +20,9 @@ const config: BaywatchConfig = {
     // The `[1m]` suffix selects the 1M token context window.
     agent: {
         model: "claude-opus-4-7[1m]",
+        // Enables Claude Code's remote-control mode in every spawned agent so you can
+        // monitor running sessions from claude.ai/code or the mobile app. Defaults to true.
+        remoteControl: true,
     },
 
     // Per-repo overrides (e.g. custom default branch, custom install command).

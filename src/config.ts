@@ -10,7 +10,12 @@ export type RepoOverride = {
 export type BaywatchConfig = {
     cloneRoots: string[]
     blocklist: string[]
-    agent: { model: string }
+    agent: {
+        model: string
+        // Enable Claude Code's remote-control mode for spawned agents so you can monitor
+        // running sessions at claude.ai/code from any device. Defaults to true.
+        remoteControl?: boolean
+    }
     repoOverrides: Record<string, RepoOverride>
 }
 

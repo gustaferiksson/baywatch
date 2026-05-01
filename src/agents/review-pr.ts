@@ -5,6 +5,7 @@ import { podman } from "@ai-hero/sandcastle/sandboxes/podman"
 import { $ } from "bun"
 
 import { loadAgentEnv } from "../agentEnv.ts"
+import { removeAgentSettings, writeAgentSettings } from "../agentSettings.ts"
 import { BAYWATCH_ROOT, type BaywatchConfig } from "../config.ts"
 import type { DiscoveredPR } from "../discovery.ts"
 import { completeRun, recordReview, startRun } from "../state.ts"
@@ -55,6 +56,8 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
         target: `pr-${pr.number}`,
         reviewPath: reviewHostPath,
     })
+
+    const settingsPath = writeAgentSettings({ targetDir: pr.repoPath, config, asLocalOverride: true })
 
     try {
         const result = await run({
@@ -107,5 +110,7 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
     } catch (err) {
         completeRun(runId, { status: "failed" })
         throw err
+    } finally {
+        removeAgentSettings(settingsPath)
     }
 }

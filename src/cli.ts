@@ -12,8 +12,8 @@ USAGE
   baywatch <command> [options]
 
 COMMANDS
-  list issues [REF ...]                                       Issues assigned (+ ad-hoc refs)
-  list prs [REF ...]                                          PRs assigned + review-requested (+ ad-hoc refs)
+  list issues [--json] [REF ...]                              Issues assigned (+ ad-hoc refs)
+  list prs [--json] [REF ...]                                 PRs assigned + review-requested (+ ad-hoc refs)
   dev [--dry-run] [--only] [--limit N] [REF ...]              Run the dev agent
   review [--dry-run] [--only] [--limit N] [REF ...]           Run the review agent
   logs [<id>] [--follow] [--running] [--json] [--limit N]     Recent agent run logs (id picks one; --follow tails; --json for tooling)
@@ -64,20 +64,39 @@ const parseRunOpts = (argv: string[]): RunOpts => {
     return out
 }
 
-const parseRefArgs = (argv: string[]): string[] => {
-    const out: string[] = []
+type ListOpts = { refs: string[]; json: boolean }
+
+const parseListOpts = (argv: string[]): ListOpts => {
+    const out: ListOpts = { refs: [], json: false }
     for (const a of argv) {
         if (a === "-h" || a === "--help") printHelpAndExit()
+        if (a === "--json") {
+            out.json = true
+            continue
+        }
         if (a.startsWith("-")) throw new Error(`unknown arg: ${a}`)
         if (!isRef(a)) throw new Error(`bad ref: ${a} (expected owner/repo#num)`)
-        out.push(a)
+        out.refs.push(a)
     }
     return out
 }
 
-const listIssues = async (refs: string[]): Promise<void> => {
+const listIssues = async (refs: string[], json: boolean): Promise<void> => {
     const cfg = await loadConfig()
     const issues = await discoverIssues(cfg, refs)
+    if (json) {
+        const out = issues.map((i) => ({
+            ref: `${i.repository.nameWithOwner}#${i.number}`,
+            ownerRepo: i.repository.nameWithOwner,
+            number: i.number,
+            title: i.title,
+            url: i.url,
+            hasClone: i.repoPath !== null,
+            blockedByPRs: i.linkedOpenPRs.map((pr) => pr.number),
+        }))
+        process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
+        return
+    }
     if (issues.length === 0) {
         console.log("No issues.")
         return
@@ -92,9 +111,24 @@ const listIssues = async (refs: string[]): Promise<void> => {
     }
 }
 
-const listPRs = async (refs: string[]): Promise<void> => {
+const listPRs = async (refs: string[], json: boolean): Promise<void> => {
     const cfg = await loadConfig()
     const prs = await discoverPRs(cfg, refs)
+    if (json) {
+        const out = prs.map((pr) => ({
+            ref: `${pr.repository.nameWithOwner}#${pr.number}`,
+            ownerRepo: pr.repository.nameWithOwner,
+            number: pr.number,
+            title: pr.title,
+            url: pr.url,
+            hasClone: pr.repoPath !== null,
+            reasonForReview: pr.reasonForReview,
+            alreadyReviewedAtThisHead: pr.alreadyReviewedAtThisHead,
+            headRefOid: pr.headRefOid,
+        }))
+        process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
+        return
+    }
     if (prs.length === 0) {
         console.log("No PRs to review.")
         return
@@ -221,9 +255,13 @@ try {
     switch (cmd) {
         case "list": {
             const sub = argv[1]
-            if (sub === "issues") await listIssues(parseRefArgs(argv.slice(2)))
-            else if (sub === "prs") await listPRs(parseRefArgs(argv.slice(2)))
-            else throw new Error(`unknown 'list' subcommand: ${sub ?? "(missing)"}`)
+            if (sub === "issues") {
+                const opts = parseListOpts(argv.slice(2))
+                await listIssues(opts.refs, opts.json)
+            } else if (sub === "prs") {
+                const opts = parseListOpts(argv.slice(2))
+                await listPRs(opts.refs, opts.json)
+            } else throw new Error(`unknown 'list' subcommand: ${sub ?? "(missing)"}`)
             break
         }
         case "dev":

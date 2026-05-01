@@ -16,6 +16,68 @@ const limitOption: Fig.Option = {
     args: { name: "n", suggestions: ["1", "3", "5", "10"] },
 }
 
+const jsonOption: Fig.Option = {
+    name: "--json",
+    description: "Emit JSON (used by tooling and Fig generators)",
+}
+
+const issueRefArg: Fig.Arg = {
+    name: "issue-ref",
+    description: "owner/repo#num (Tab to pick from your assigned issues)",
+    isOptional: true,
+    isVariadic: true,
+    generators: {
+        script: ["sh", "-c", "baywatch list issues --json 2>/dev/null"],
+        cache: { ttl: 60_000 },
+        postProcess: (out: string) => {
+            try {
+                const list = JSON.parse(out) as Array<{
+                    ref: string
+                    title: string
+                    blockedByPRs: number[]
+                    hasClone: boolean
+                }>
+                return list.map((i) => ({
+                    name: i.ref,
+                    description: `${i.title}${i.blockedByPRs.length > 0 ? `  [blocked by PR #${i.blockedByPRs[0]}]` : ""}${i.hasClone ? "" : "  [no local clone]"}`,
+                    priority: i.hasClone && i.blockedByPRs.length === 0 ? 100 : 60,
+                }))
+            } catch {
+                return []
+            }
+        },
+    },
+}
+
+const prRefArg: Fig.Arg = {
+    name: "pr-ref",
+    description: "owner/repo#num (Tab to pick from your discoverable PRs)",
+    isOptional: true,
+    isVariadic: true,
+    generators: {
+        script: ["sh", "-c", "baywatch list prs --json 2>/dev/null"],
+        cache: { ttl: 60_000 },
+        postProcess: (out: string) => {
+            try {
+                const list = JSON.parse(out) as Array<{
+                    ref: string
+                    title: string
+                    reasonForReview: string
+                    alreadyReviewedAtThisHead: boolean
+                    hasClone: boolean
+                }>
+                return list.map((p) => ({
+                    name: p.ref,
+                    description: `${p.title}  [${p.reasonForReview}]${p.alreadyReviewedAtThisHead ? "  [reviewed-at-head]" : ""}${p.hasClone ? "" : "  [no local clone]"}`,
+                    priority: p.hasClone && !p.alreadyReviewedAtThisHead ? 100 : 60,
+                }))
+            } catch {
+                return []
+            }
+        },
+    },
+}
+
 const completionSpec: Fig.Spec = {
     name: "baywatch",
     description: "Personal agent orchestrator for solving GH issues and reviewing PRs locally",
@@ -27,12 +89,14 @@ const completionSpec: Fig.Spec = {
                 {
                     name: "issues",
                     description: "Issues assigned to me (+ ad-hoc refs)",
-                    args: { name: "ref", description: "owner/repo#num", isOptional: true, isVariadic: true },
+                    options: [jsonOption],
+                    args: issueRefArg,
                 },
                 {
                     name: "prs",
                     description: "PRs assigned + review-requested (+ ad-hoc refs)",
-                    args: { name: "ref", description: "owner/repo#num", isOptional: true, isVariadic: true },
+                    options: [jsonOption],
+                    args: prRefArg,
                 },
             ],
         },
@@ -40,13 +104,13 @@ const completionSpec: Fig.Spec = {
             name: "dev",
             description: "Run the dev agent against discovered issues (+ ad-hoc refs)",
             options: [dryRunOption, onlyOption, limitOption],
-            args: { name: "ref", description: "owner/repo#num", isOptional: true, isVariadic: true },
+            args: issueRefArg,
         },
         {
             name: "review",
             description: "Run the review agent against discovered PRs (+ ad-hoc refs)",
             options: [dryRunOption, onlyOption, limitOption],
-            args: { name: "ref", description: "owner/repo#num", isOptional: true, isVariadic: true },
+            args: prRefArg,
         },
         {
             name: "logs",
