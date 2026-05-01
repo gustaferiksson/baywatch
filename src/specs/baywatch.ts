@@ -10,6 +10,11 @@ const onlyOption: Fig.Option = {
     description: "Run only the explicit REFs; skip auto-discovery",
 }
 
+const autoOption: Fig.Option = {
+    name: "--auto",
+    description: "Skip the interactive picker; take first --limit from discovery",
+}
+
 const limitOption: Fig.Option = {
     name: "--limit",
     description: "Max items to process",
@@ -103,13 +108,13 @@ const completionSpec: Fig.Spec = {
         {
             name: "dev",
             description: "Run the dev agent against discovered issues (+ ad-hoc refs)",
-            options: [dryRunOption, onlyOption, limitOption],
+            options: [dryRunOption, onlyOption, autoOption, limitOption],
             args: issueRefArg,
         },
         {
             name: "review",
             description: "Run the review agent against discovered PRs (+ ad-hoc refs)",
-            options: [dryRunOption, onlyOption, limitOption],
+            options: [dryRunOption, onlyOption, autoOption, limitOption],
             args: prRefArg,
         },
         {

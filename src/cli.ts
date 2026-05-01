@@ -5,6 +5,7 @@ import { loadConfig } from "./config.ts"
 import { discoverIssues, discoverPRs } from "./discovery.ts"
 import { installSpecs } from "./install-specs.ts"
 import { formatAge, formatDuration, listRecentLogs } from "./logs.ts"
+import { pickIssues, pickPRs } from "./picker.ts"
 
 const HELP = `baywatch — personal agent orchestrator
 
@@ -14,8 +15,8 @@ USAGE
 COMMANDS
   list issues [--json] [REF ...]                              Issues assigned (+ ad-hoc refs)
   list prs [--json] [REF ...]                                 PRs assigned + review-requested (+ ad-hoc refs)
-  dev [--dry-run] [--only] [--limit N] [REF ...]              Run the dev agent
-  review [--dry-run] [--only] [--limit N] [REF ...]           Run the review agent
+  dev [--dry-run] [--only] [--auto] [--limit N] [REF ...]     Run the dev agent (no args + TTY → picker)
+  review [--dry-run] [--only] [--auto] [--limit N] [REF ...]  Run the review agent (no args + TTY → picker)
   logs [<id>] [--follow] [--running] [--json] [--limit N]     Recent agent run logs (id picks one; --follow tails; --json for tooling)
   install-specs                                               Build & install Fig autocomplete spec
   -h, --help                                                  Show this help
@@ -25,6 +26,7 @@ REF
 
 FLAGS
   --only              Run only the explicit REFs; skip auto-discovery
+  --auto              Skip the interactive picker; take first --limit from discovery
 `
 
 const REF_RE = /^[^/]+\/[^#]+#\d+$/
@@ -35,16 +37,18 @@ const printHelpAndExit = (): never => {
     process.exit(0)
 }
 
-type RunOpts = { dryRun: boolean; limit: number; refs: string[]; only: boolean }
+type RunOpts = { dryRun: boolean; limit: number; refs: string[]; only: boolean; auto: boolean }
 
 const parseRunOpts = (argv: string[]): RunOpts => {
-    const out: RunOpts = { dryRun: false, limit: 1, refs: [], only: false }
+    const out: RunOpts = { dryRun: false, limit: 1, refs: [], only: false, auto: false }
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i]
         if (a === "--dry-run") {
             out.dryRun = true
         } else if (a === "--only") {
             out.only = true
+        } else if (a === "--auto") {
+            out.auto = true
         } else if (a === "--limit") {
             const v = argv[i + 1]
             if (v === undefined) throw new Error("--limit requires a value")
@@ -142,14 +146,31 @@ const listPRs = async (refs: string[], json: boolean): Promise<void> => {
     }
 }
 
+const shouldUsePicker = (opts: RunOpts): boolean => {
+    if (opts.refs.length > 0) return false
+    if (opts.auto) return false
+    return process.stdin.isTTY === true
+}
+
 const runDev = async (opts: RunOpts): Promise<void> => {
     if (opts.only && opts.refs.length === 0) throw new Error("--only requires at least one REF")
     const cfg = await loadConfig()
     const all = await discoverIssues(cfg, opts.refs)
-    const filtered = opts.only
-        ? all.filter((i) => opts.refs.includes(`${i.repository.nameWithOwner}#${i.number}`))
-        : all
-    const issues = filtered.slice(0, opts.limit)
+
+    let issues: typeof all
+    if (shouldUsePicker(opts)) {
+        if (all.length === 0) {
+            console.log("No issues to pick.")
+            return
+        }
+        issues = await pickIssues(all)
+    } else {
+        const filtered = opts.only
+            ? all.filter((i) => opts.refs.includes(`${i.repository.nameWithOwner}#${i.number}`))
+            : all
+        issues = filtered.slice(0, opts.limit)
+    }
+
     for (const issue of issues) await solveIssue({ issue, config: cfg, dryRun: opts.dryRun })
 }
 
@@ -157,10 +178,21 @@ const runReview = async (opts: RunOpts): Promise<void> => {
     if (opts.only && opts.refs.length === 0) throw new Error("--only requires at least one REF")
     const cfg = await loadConfig()
     const all = await discoverPRs(cfg, opts.refs)
-    const filtered = opts.only
-        ? all.filter((pr) => opts.refs.includes(`${pr.repository.nameWithOwner}#${pr.number}`))
-        : all
-    const prs = filtered.slice(0, opts.limit)
+
+    let prs: typeof all
+    if (shouldUsePicker(opts)) {
+        if (all.length === 0) {
+            console.log("No PRs to pick.")
+            return
+        }
+        prs = await pickPRs(all)
+    } else {
+        const filtered = opts.only
+            ? all.filter((pr) => opts.refs.includes(`${pr.repository.nameWithOwner}#${pr.number}`))
+            : all
+        prs = filtered.slice(0, opts.limit)
+    }
+
     for (const pr of prs) await reviewPR({ pr, config: cfg, dryRun: opts.dryRun })
 }
 
