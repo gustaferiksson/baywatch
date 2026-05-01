@@ -79,6 +79,20 @@
                 "icon": "$(window)"
             },
             {
+                "command": "baywatch.openReview",
+                "title": "Baywatch: Open review markdown",
+                "icon": "$(go-to-file)"
+            },
+            {
+                "command": "baywatch.retryRun",
+                "title": "Baywatch: Retry run",
+                "icon": "$(debug-restart)"
+            },
+            {
+                "command": "baywatch.runDoctor",
+                "title": "Baywatch: Run doctor (preflight check)"
+            },
+            {
                 "command": "baywatch.editNotesForIssue",
                 "title": "Baywatch: Edit notes for issue…",
                 "icon": "$(edit)"
@@ -147,14 +161,14 @@
                     "group": "inline@2"
                 },
                 {
-                    "command": "baywatch.pushBranch",
-                    "when": "view == baywatch.runs && viewItem == dev-run",
-                    "group": "inline@3"
+                    "command": "baywatch.openReview",
+                    "when": "view == baywatch.runs && viewItem == review-run",
+                    "group": "inline@2"
                 },
                 {
-                    "command": "baywatch.openPR",
-                    "when": "view == baywatch.runs && viewItem == dev-run",
-                    "group": "inline@4"
+                    "command": "baywatch.retryRun",
+                    "when": "view == baywatch.runs",
+                    "group": "inline@3"
                 },
                 {
                     "command": "baywatch.openLog",
@@ -165,6 +179,16 @@
                     "command": "baywatch.openClone",
                     "when": "view == baywatch.runs && viewItem == dev-run",
                     "group": "1_view"
+                },
+                {
+                    "command": "baywatch.openReview",
+                    "when": "view == baywatch.runs && viewItem == review-run",
+                    "group": "1_view"
+                },
+                {
+                    "command": "baywatch.retryRun",
+                    "when": "view == baywatch.runs",
+                    "group": "2_action"
                 },
                 {
                     "command": "baywatch.pushBranch",
@@ -188,6 +212,14 @@
                 },
                 {
                     "command": "baywatch.openClone",
+                    "when": "false"
+                },
+                {
+                    "command": "baywatch.openReview",
+                    "when": "false"
+                },
+                {
+                    "command": "baywatch.retryRun",
                     "when": "false"
                 },
                 {

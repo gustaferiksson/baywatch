@@ -5,7 +5,7 @@ import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import * as vscode from "vscode"
 
-import type { IssueRef, PrRef, RunDetail, RunEntry, RunStatus } from "./types.js"
+import type { DoctorCheck, IssueRef, PrRef, RunDetail, RunEntry, RunStatus } from "./types.js"
 
 const execFileAsync = promisify(execFile)
 
@@ -73,4 +73,48 @@ export function statusIcon(status: RunStatus): string {
     if (status === "success") return "check"
     if (status === "failed") return "error"
     return "circle-slash"
+}
+
+// Run `baywatch doctor` and return the parsed checks. baywatch doctor doesn't have a --json
+// mode (yet) — parse the human-readable output. Falls back to a single failure entry on error.
+export async function runDoctor(): Promise<{ checks: DoctorCheck[]; ok: boolean }> {
+    try {
+        const { stdout } = await execFileAsync("baywatch", ["doctor"], { maxBuffer: BUFFER })
+        return parseDoctorOutput(stdout)
+    } catch (err) {
+        // `baywatch doctor` exits non-zero on any failure — execFile rejects but stdout is on the error.
+        const e = err as NodeJS.ErrnoException & { stdout?: string }
+        if (e.stdout) return parseDoctorOutput(e.stdout)
+        return {
+            checks: [
+                {
+                    name: "baywatch CLI",
+                    status: "fail",
+                    detail: (err as Error).message,
+                    hint: "is `baywatch` on your PATH?",
+                },
+            ],
+            ok: false,
+        }
+    }
+}
+
+function parseDoctorOutput(stdout: string): { checks: DoctorCheck[]; ok: boolean } {
+    const checks: DoctorCheck[] = []
+    let pending: DoctorCheck | null = null
+    for (const rawLine of stdout.split("\n")) {
+        const line = rawLine.trimEnd()
+        const match = line.match(/^([✓!✗])\s+(.+?)\s{2,}(.+)$/)
+        if (match) {
+            if (pending) checks.push(pending)
+            const sym = match[1]
+            const status: DoctorCheck["status"] = sym === "✓" ? "ok" : sym === "!" ? "warn" : "fail"
+            pending = { name: match[2]?.trim() ?? "", status, detail: match[3]?.trim() ?? "" }
+            continue
+        }
+        const hintMatch = line.match(/^\s+→\s+(.+)$/)
+        if (hintMatch && pending) pending.hint = hintMatch[1]?.trim() ?? ""
+    }
+    if (pending) checks.push(pending)
+    return { checks, ok: checks.every((c) => c.status !== "fail") }
 }

@@ -5,7 +5,7 @@
 
 import * as vscode from "vscode"
 
-import { getRun, listIssueRefs, listPrRefs } from "./cli.js"
+import { getRun, listIssueRefs, listPrRefs, runDoctor } from "./cli.js"
 import { tailRun } from "./log-channel.js"
 import { openNotesPanel } from "./notes-panel.js"
 import { ReviewsTreeDataProvider } from "./reviews-tree.js"
@@ -22,16 +22,44 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.window.registerTreeDataProvider("baywatch.reviews", reviewsProvider)
     )
 
-    const refreshAll = (): void => {
+    // Track which runs we've already auto-surfaced as failed, so we don't keep re-popping the channel.
+    const surfacedFailures = new Set<number>()
+
+    const refreshAll = async (): Promise<void> => {
         runsProvider.refresh()
         reviewsProvider.refresh()
-        void updateStatusBar(context)
+        await updateStatusBar(context)
+        // Auto-show the log channel for runs that just flipped to failed.
+        try {
+            const { listRuns } = await import("./cli.js")
+            const recent = await listRuns({ limit: 10 })
+            for (const r of recent) {
+                if (r.status === "failed" && !surfacedFailures.has(r.runId)) {
+                    surfacedFailures.add(r.runId)
+                    void vscode.window
+                        .showErrorMessage(
+                            `Baywatch run #${r.runId} failed: ${r.errorSummary ?? "(no error summary)"}`,
+                            "Tail log"
+                        )
+                        .then((choice) => {
+                            if (choice === "Tail log" && r.logPath) tailRun(r)
+                        })
+                }
+            }
+        } catch {
+            // refresh shouldn't error-out the extension; the tree's own error toast handles it.
+        }
     }
 
     context.subscriptions.push(
-        vscode.commands.registerCommand("baywatch.refreshRuns", refreshAll),
-        vscode.commands.registerCommand("baywatch.runDev", () => runDevCommand(refreshAll)),
-        vscode.commands.registerCommand("baywatch.runReview", () => runReviewCommand(refreshAll)),
+        vscode.commands.registerCommand("baywatch.refreshRuns", () => refreshAll()),
+        vscode.commands.registerCommand("baywatch.runDev", () => runDevCommand(() => void refreshAll())),
+        vscode.commands.registerCommand("baywatch.runReview", () => runReviewCommand(() => void refreshAll())),
+        vscode.commands.registerCommand("baywatch.retryRun", (run?: RunEntry) =>
+            retryRunCommand(run, () => void refreshAll())
+        ),
+        vscode.commands.registerCommand("baywatch.openReview", (run?: RunEntry) => openReviewCommand(run)),
+        vscode.commands.registerCommand("baywatch.runDoctor", () => doctorCommand()),
         vscode.commands.registerCommand("baywatch.tailLog", (run?: RunEntry) => {
             if (run) tailRun(run)
         }),
@@ -72,9 +100,12 @@ export function activate(context: vscode.ExtensionContext): void {
     )
 
     // Initial draw + auto-refresh every 10s.
-    refreshAll()
-    const interval = setInterval(refreshAll, 10_000)
+    void refreshAll()
+    const interval = setInterval(() => void refreshAll(), 10_000)
     context.subscriptions.push({ dispose: () => clearInterval(interval) })
+
+    // First-activation doctor pass: nudges users about setup gaps without being noisy on every refresh.
+    void doctorOnActivate()
 }
 
 export function deactivate(): void {}
@@ -195,6 +226,67 @@ async function startClaudeSessionCommand(): Promise<void> {
     const term = vscode.window.createTerminal({ name: `claude · ${sessionName}`, cwd: target })
     term.show(true)
     term.sendText(`claude --remote-control "${sessionName.replace(/"/g, '\\"')}"`)
+}
+
+async function retryRunCommand(run: RunEntry | undefined, refresh: () => void): Promise<void> {
+    if (!run) {
+        void vscode.window.showInformationMessage("Right-click a run to retry it.")
+        return
+    }
+    const confirm = await vscode.window.showInformationMessage(
+        `Retry run #${run.runId} (${run.kind} ${run.ownerRepo} ${run.target})?`,
+        { modal: false },
+        "Retry"
+    )
+    if (confirm !== "Retry") return
+    const term = vscode.window.createTerminal({ name: `baywatch retry #${run.runId}` })
+    term.show(true)
+    term.sendText(`baywatch retry ${run.runId}`)
+    setTimeout(refresh, 750)
+}
+
+async function openReviewCommand(run?: RunEntry): Promise<void> {
+    if (!run || run.kind !== "review") {
+        void vscode.window.showInformationMessage("Right-click a review run to open its markdown.")
+        return
+    }
+    const detail = await getRun(run.runId)
+    if (!detail?.reviewPath) {
+        void vscode.window.showInformationMessage("This review run has no markdown recorded.")
+        return
+    }
+    const doc = await vscode.workspace.openTextDocument(detail.reviewPath)
+    await vscode.window.showTextDocument(doc)
+}
+
+async function doctorCommand(): Promise<void> {
+    const result = await runDoctor()
+    const lines = result.checks.map((c) => {
+        const icon = c.status === "ok" ? "✓" : c.status === "warn" ? "!" : "✗"
+        return `${icon} ${c.name} — ${c.detail}${c.hint ? `\n  → ${c.hint}` : ""}`
+    })
+    const summary = result.ok ? "All checks passed." : "Some checks failed — see hints below."
+    const channel = vscode.window.createOutputChannel("Baywatch · doctor")
+    channel.clear()
+    channel.appendLine(summary)
+    channel.appendLine("")
+    channel.appendLine(lines.join("\n"))
+    channel.show(true)
+}
+
+async function doctorOnActivate(): Promise<void> {
+    try {
+        const result = await runDoctor()
+        if (result.ok) return
+        const failed = result.checks.filter((c) => c.status === "fail")
+        const choice = await vscode.window.showWarningMessage(
+            `Baywatch setup: ${failed.length} check(s) failing — ${failed.map((c) => c.name).join(", ")}`,
+            "Show details"
+        )
+        if (choice === "Show details") await doctorCommand()
+    } catch {
+        // baywatch CLI not installed — silent. The user has to install it for the extension to be useful anyway.
+    }
 }
 
 async function pushBranchCommand(run?: RunEntry): Promise<void> {

@@ -12,11 +12,19 @@ export type RunEntry = {
     startedAt: string
     finishedAt: string | null
     logPath: string | null
+    errorSummary: string | null
 }
 
 export type RunDetail = RunEntry & {
     agentClonePath: string | null
     reviewPath: string | null
+}
+
+export type DoctorCheck = {
+    name: string
+    status: "ok" | "warn" | "fail"
+    detail: string
+    hint?: string
 }
 
 export type IssueRef = {

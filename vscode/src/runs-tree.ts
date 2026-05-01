@@ -13,12 +13,15 @@ export class RunsTreeDataProvider implements vscode.TreeDataProvider<RunEntry> {
 
     getTreeItem(run: RunEntry): vscode.TreeItem {
         const item = new vscode.TreeItem(`#${run.runId} ${run.ownerRepo} ${run.target}`)
-        item.description = `${run.kind}  ${run.status}`
+        const failureSuffix =
+            run.status === "failed" && run.errorSummary ? `  ·  ${truncate(run.errorSummary, 40)}` : ""
+        item.description = `${run.kind}  ${run.status}${failureSuffix}`
         item.tooltip = new vscode.MarkdownString(
             [
                 `**${run.ownerRepo} ${run.target}**`,
                 `kind: \`${run.kind}\`  ·  status: \`${run.status}\``,
                 run.branch ? `branch: \`${run.branch}\`` : "",
+                run.errorSummary ? `error: \`${run.errorSummary}\`` : "",
                 run.logPath ? `log: \`${run.logPath}\`` : "(no log file yet)",
             ]
                 .filter(Boolean)
@@ -44,4 +47,8 @@ export class RunsTreeDataProvider implements vscode.TreeDataProvider<RunEntry> {
             return []
         }
     }
+}
+
+function truncate(s: string, max: number): string {
+    return s.length > max ? `${s.slice(0, max - 1)}…` : s
 }
