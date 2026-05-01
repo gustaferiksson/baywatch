@@ -1,8 +1,10 @@
 import type { BaywatchConfig } from "./config.ts"
 import {
+    findLinkedOpenPRs,
     getIssue,
     getPR,
     type Issue,
+    type LinkedPR,
     listAssignedIssues,
     listAssignedPRs,
     listReviewRequestedPRs,
@@ -12,7 +14,10 @@ import {
 import { findRepoPath } from "./prep.ts"
 import { getLatestReviewFor } from "./state.ts"
 
-export type DiscoveredIssue = Issue & { repoPath: string | null }
+export type DiscoveredIssue = Issue & {
+    repoPath: string | null
+    linkedOpenPRs: LinkedPR[]
+}
 
 export type DiscoveredPR = PR & {
     repoPath: string | null
@@ -27,16 +32,16 @@ function isBlocked(ownerRepo: string, blocklist: string[]): boolean {
 export async function discoverIssues(config: BaywatchConfig, extraRefs: string[] = []): Promise<DiscoveredIssue[]> {
     const auto = await listAssignedIssues()
     const seen = new Set<string>()
-    const out: DiscoveredIssue[] = []
-    const push = (i: Issue): void => {
+    const collected: Issue[] = []
+    const accept = (i: Issue): void => {
         const key = `${i.repository.nameWithOwner}#${i.number}`
         if (seen.has(key)) return
         if (isBlocked(i.repository.nameWithOwner, config.blocklist)) return
         seen.add(key)
-        out.push({ ...i, repoPath: findRepoPath(i.repository.nameWithOwner, config.cloneRoots) })
+        collected.push(i)
     }
 
-    for (const i of auto) push(i)
+    for (const i of auto) accept(i)
 
     const parsedRefs: { ownerRepo: string; num: number }[] = []
     for (const entry of extraRefs) {
@@ -53,10 +58,26 @@ export async function discoverIssues(config: BaywatchConfig, extraRefs: string[]
         const r = fetched[i]
         const ref = parsedRefs[i]
         if (!r || !ref) continue
-        if (r.status === "fulfilled") push(r.value)
+        if (r.status === "fulfilled") accept(r.value)
         else console.warn(`[discovery] failed to fetch ${ref.ownerRepo}#${ref.num}: ${r.reason}`)
     }
-    return out
+
+    // Concurrent linked-PR check per issue. Empty array means nothing blocking.
+    const linked = await Promise.all(
+        collected.map((i) =>
+            findLinkedOpenPRs(i.repository.nameWithOwner, i.number).catch((err: unknown) => {
+                console.warn(
+                    `[discovery] linked-PR lookup failed for ${i.repository.nameWithOwner}#${i.number}: ${(err as Error).message}`
+                )
+                return [] as LinkedPR[]
+            })
+        )
+    )
+    return collected.map((issue, idx) => ({
+        ...issue,
+        repoPath: findRepoPath(issue.repository.nameWithOwner, config.cloneRoots),
+        linkedOpenPRs: linked[idx] ?? [],
+    }))
 }
 
 type Candidate = {

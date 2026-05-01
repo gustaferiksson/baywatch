@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs"
+import { appendFileSync, existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { $ } from "bun"
 
@@ -9,6 +9,7 @@ export type PrepResult = {
     repoPath: string
     branch: string
     baseSha: string
+    defaultBranch: string
 }
 
 function detectInstallCmd(repoPath: string): string | null {
@@ -76,5 +77,18 @@ export async function prepRepo(opts: {
         if (code !== 0) throw new Error(`install failed (exit ${code}): ${installCmd}`)
     }
 
-    return { repoPath, branch: branchName, baseSha }
+    excludeSandcastleLocally(repoPath)
+
+    return { repoPath, branch: branchName, baseSha, defaultBranch }
+}
+
+// Add `.sandcastle/` to the repo's local-only ignore (`.git/info/exclude`) so the
+// metadata sandcastle drops in the worktree doesn't appear as untracked changes.
+// This is per-clone and never committed.
+function excludeSandcastleLocally(repoPath: string): void {
+    const excludePath = path.join(repoPath, ".git", "info", "exclude")
+    if (!existsSync(excludePath)) return
+    const current = readFileSync(excludePath, "utf8")
+    if (current.split("\n").some((line) => line.trim() === ".sandcastle/")) return
+    appendFileSync(excludePath, current.endsWith("\n") ? ".sandcastle/\n" : "\n.sandcastle/\n")
 }

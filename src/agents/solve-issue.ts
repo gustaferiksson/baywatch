@@ -1,6 +1,14 @@
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+import { claudeCode, run } from "@ai-hero/sandcastle"
+import { podman } from "@ai-hero/sandcastle/sandboxes/podman"
+
+import { loadAgentAuthEnv } from "../agentEnv.ts"
 import type { BaywatchConfig } from "../config.ts"
 import type { DiscoveredIssue } from "../discovery.ts"
 import { prepRepo } from "../prep.ts"
+
+const PROMPT_PATH = path.resolve(fileURLToPath(new URL("../..", import.meta.url)), "prompts", "solve-issue.md")
 
 function slugify(s: string): string {
     return s
@@ -18,6 +26,12 @@ export async function solveIssue(opts: {
     const { issue, config, dryRun } = opts
     const ownerRepo = issue.repository.nameWithOwner
 
+    if (issue.linkedOpenPRs.length > 0) {
+        const list = issue.linkedOpenPRs.map((pr) => `#${pr.number}`).join(", ")
+        console.log(`[dev] ${ownerRepo}#${issue.number} — open linked PRs (${list}); skipping`)
+        return
+    }
+
     if (!issue.repoPath) {
         console.error(`[dev] no local clone for ${ownerRepo}; skipping issue #${issue.number}`)
         return
@@ -34,14 +48,25 @@ export async function solveIssue(opts: {
     const prep = await prepRepo({ ownerRepo, branchName, config })
     console.log(`[dev]   prepped: ${prep.repoPath} on ${prep.branch} @ ${prep.baseSha.slice(0, 7)}`)
 
-    // TODO(iter-2): wire @ai-hero/sandcastle:
-    //   await sandcastle.run({
-    //     agent: claudeCode(config.agent.model),
-    //     sandbox: podman(),
-    //     branchStrategy: "head",
-    //     workdir: prep.repoPath,
-    //     promptFile: "prompts/solve-issue.md",
-    //     env: { ISSUE_NUMBER: String(issue.number), ISSUE_TITLE: issue.title, ISSUE_BODY: issue.body, ISSUE_URL: issue.url },
-    //   })
-    console.log("[dev]   (stub) sandcastle wiring not yet implemented — branch is prepped and waiting")
+    const result = await run({
+        agent: claudeCode(config.agent.model),
+        sandbox: podman({ env: loadAgentAuthEnv() }),
+        cwd: prep.repoPath,
+        promptFile: PROMPT_PATH,
+        promptArgs: {
+            ISSUE_REPO: ownerRepo,
+            ISSUE_NUMBER: String(issue.number),
+            ISSUE_TITLE: issue.title,
+            ISSUE_BODY: issue.body || "(empty)",
+            ISSUE_URL: issue.url,
+            BRANCH_NAME: prep.branch,
+            DEFAULT_BRANCH: prep.defaultBranch,
+        },
+        branchStrategy: { type: "head" },
+        name: `issue-${issue.number}`,
+    })
+
+    console.log(`[dev]   done: ${result.commits.length} commit(s) on ${result.branch}`)
+    if (result.completionSignal) console.log(`[dev]   signal: ${result.completionSignal}`)
+    if (result.logFilePath) console.log(`[dev]   log: ${result.logFilePath}`)
 }

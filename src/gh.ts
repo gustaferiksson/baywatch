@@ -60,3 +60,19 @@ export async function getIssue(ownerRepo: string, num: number): Promise<Issue> {
     const parsed = JSON.parse(json) as Omit<Issue, "repository">
     return { ...parsed, repository: { nameWithOwner: ownerRepo } }
 }
+
+export type LinkedPR = { number: number; title: string; url: string }
+
+// Returns open PRs in `ownerRepo` whose title or body contains a closing keyword
+// referencing the issue (closes/fixes/resolves #N). gh 2.69 doesn't expose
+// `closedByPullRequestsReferences`, so we search and post-filter.
+export async function findLinkedOpenPRs(ownerRepo: string, issueNumber: number): Promise<LinkedPR[]> {
+    const search = `#${issueNumber} in:body,title`
+    const json =
+        await $`gh pr list --repo ${ownerRepo} --state open --search ${search} --json number,title,url,body --limit 50`.text()
+    const list = JSON.parse(json) as (LinkedPR & { body: string })[]
+    const closing = new RegExp(String.raw`(?:closes|fixes|resolves)\s+#${issueNumber}\b`, "i")
+    return list
+        .filter((pr) => closing.test(pr.body ?? "") || closing.test(pr.title))
+        .map(({ number, title, url }) => ({ number, title, url }))
+}

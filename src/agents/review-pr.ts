@@ -1,34 +1,92 @@
 import { existsSync, mkdirSync } from "node:fs"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
+import { claudeCode, run } from "@ai-hero/sandcastle"
+import { podman } from "@ai-hero/sandcastle/sandboxes/podman"
+import { $ } from "bun"
 
+import { loadAgentAuthEnv } from "../agentEnv.ts"
 import type { BaywatchConfig } from "../config.ts"
 import type { DiscoveredPR } from "../discovery.ts"
+import { recordReview } from "../state.ts"
+
+const PROMPT_PATH = path.resolve(fileURLToPath(new URL("../..", import.meta.url)), "prompts", "review-pr.md")
+const REVIEWS_HOST_DIR = path.resolve(process.cwd(), "reviews")
+const REVIEWS_SANDBOX_DIR = "/baywatch-reviews"
 
 export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig; dryRun: boolean }): Promise<void> {
-    const { pr, dryRun } = opts
+    const { pr, config, dryRun } = opts
     const ownerRepo = pr.repository.nameWithOwner
 
     if (pr.alreadyReviewedAtThisHead) {
         console.log(`[review] ${ownerRepo}#${pr.number} — already reviewed at ${pr.headRefOid.slice(0, 7)}, skipping`)
         return
     }
-
-    const reviewDir = path.resolve(process.cwd(), "reviews")
-    if (!existsSync(reviewDir)) mkdirSync(reviewDir, { recursive: true })
-    const reviewPath = path.join(reviewDir, `${ownerRepo.replace("/", "__")}__${pr.number}.md`)
-
-    console.log(
-        `[review] ${ownerRepo}#${pr.number} (${pr.reasonForReview}) → ${path.relative(process.cwd(), reviewPath)}`
-    )
-
-    if (dryRun) {
-        console.log(`[review]   (dry-run) would run sandcastle review agent and write ${reviewPath}`)
+    if (!pr.repoPath) {
+        console.error(`[review] no local clone for ${ownerRepo}; skipping PR #${pr.number}`)
         return
     }
 
-    // TODO(iter-2): wire @ai-hero/sandcastle review agent here.
-    //   Output: write a markdown review to reviewPath plus a submit-review.sh that the human runs manually.
-    //   On success: recordReview({ ownerRepo, prNumber: pr.number, headSha: pr.headRefOid, reviewedAt: Date.now(), reviewPath })
-    console.log("[review]   (stub) sandcastle review wiring not yet implemented")
-    return Promise.resolve()
+    if (!existsSync(REVIEWS_HOST_DIR)) mkdirSync(REVIEWS_HOST_DIR, { recursive: true })
+
+    const flatRepo = ownerRepo.replace("/", "__")
+    const reviewFilename = `${flatRepo}__${pr.number}.md`
+    const submitScriptFilename = `${flatRepo}__${pr.number}__submit-review.sh`
+    const reviewHostPath = path.join(REVIEWS_HOST_DIR, reviewFilename)
+    const reviewSandboxPath = `${REVIEWS_SANDBOX_DIR}/${reviewFilename}`
+    const submitSandboxPath = `${REVIEWS_SANDBOX_DIR}/${submitScriptFilename}`
+
+    console.log(
+        `[review] ${ownerRepo}#${pr.number} (${pr.reasonForReview}) → ${path.relative(process.cwd(), reviewHostPath)}`
+    )
+
+    if (dryRun) {
+        console.log(`[review]   (dry-run) would run sandcastle review and write ${reviewHostPath}`)
+        return
+    }
+
+    // Pre-fetch the diff on the host. The sandbox has no gh auth, so the agent reads it
+    // from the prompt rather than calling gh inside the container.
+    const diff = await $`gh pr diff ${pr.number} --repo ${ownerRepo}`.text()
+
+    const result = await run({
+        agent: claudeCode(config.agent.model),
+        sandbox: podman({
+            env: loadAgentAuthEnv(),
+            mounts: [{ hostPath: REVIEWS_HOST_DIR, sandboxPath: REVIEWS_SANDBOX_DIR }],
+        }),
+        cwd: pr.repoPath,
+        promptFile: PROMPT_PATH,
+        promptArgs: {
+            PR_REPO: ownerRepo,
+            PR_NUMBER: String(pr.number),
+            PR_TITLE: pr.title,
+            PR_BODY: pr.body || "(empty)",
+            PR_URL: pr.url,
+            PR_HEAD_REF: pr.headRefName,
+            PR_BASE_REF: pr.baseRefName,
+            PR_HEAD_OID: pr.headRefOid,
+            PR_DIFF: diff,
+            REVIEW_OUTPUT_PATH: reviewSandboxPath,
+            SUBMIT_SCRIPT_PATH: submitSandboxPath,
+        },
+        branchStrategy: { type: "head" },
+        name: `review-${pr.number}`,
+    })
+
+    console.log(`[review]   done: ${result.iterations.length} iteration(s)`)
+    if (result.logFilePath) console.log(`[review]   log: ${result.logFilePath}`)
+
+    if (existsSync(reviewHostPath)) {
+        recordReview({
+            ownerRepo,
+            prNumber: pr.number,
+            headSha: pr.headRefOid,
+            reviewedAt: Date.now(),
+            reviewPath: reviewHostPath,
+        })
+        console.log(`[review]   recorded at head ${pr.headRefOid.slice(0, 7)}`)
+    } else {
+        console.warn(`[review]   no review markdown produced at ${reviewHostPath}`)
+    }
 }

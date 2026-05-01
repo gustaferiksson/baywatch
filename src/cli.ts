@@ -77,7 +77,11 @@ const listIssues = async (refs: string[]): Promise<void> => {
     }
     for (const i of issues) {
         const local = i.repoPath ? "✓" : "✗ no clone"
-        console.log(`${i.repository.nameWithOwner}#${i.number}  [${local}]  ${i.title}`)
+        const blocked =
+            i.linkedOpenPRs.length > 0
+                ? `  [blocked: ${i.linkedOpenPRs.map((pr) => `PR #${pr.number}`).join(", ")}]`
+                : ""
+        console.log(`${i.repository.nameWithOwner}#${i.number}  [${local}]${blocked}  ${i.title}`)
     }
 }
 

@@ -8,5 +8,8 @@ dist/
 .baywatch/
 reviews/
 
+# sandcastle metadata (logs/, worktrees/, patches/, .env) — created on agent runs
+.sandcastle/
+
 # local config (created from baywatch.config.example.ts) — keeps personal paths out of git
 baywatch.config.ts
