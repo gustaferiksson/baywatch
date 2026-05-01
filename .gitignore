@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+.env.local
+.DS_Store
+
+# baywatch local state + outputs
+.baywatch/
+reviews/
+
+# local config (created from baywatch.config.example.ts) — keeps personal paths out of git
+baywatch.config.ts

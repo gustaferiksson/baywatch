@@ -1,0 +1,28 @@
+{
+    "name": "baywatch",
+    "version": "0.0.1",
+    "private": true,
+    "description": "Personal agent orchestrator for solving GitHub issues and reviewing PRs locally, on top of @ai-hero/sandcastle",
+    "type": "module",
+    "bin": {
+        "baywatch": "./src/cli.ts"
+    },
+    "scripts": {
+        "baywatch": "bun run src/cli.ts",
+        "dev": "bun run --hot src/cli.ts",
+        "typecheck": "tsc --noEmit",
+        "lint": "biome lint .",
+        "format": "biome format --write .",
+        "check": "biome check . && bun run typecheck",
+        "install:specs": "bun build src/specs/*.ts --outdir ~/.fig/autocomplete/build --minify --format esm"
+    },
+    "dependencies": {
+        "@ai-hero/sandcastle": "0.5.6"
+    },
+    "devDependencies": {
+        "@biomejs/biome": "2.4.13",
+        "@types/bun": "1.3.13",
+        "@withfig/autocomplete-types": "1.31.0",
+        "typescript": "6.0.3"
+    }
+}
