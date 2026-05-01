@@ -163,6 +163,20 @@ const completionSpec: Fig.Spec = {
             description: "Rebuild the baywatch-agent podman image from baywatch's Containerfile",
         },
         {
+            name: "doctor",
+            description: "Pre-flight check: gh auth, podman machine, image, env tokens, config",
+        },
+        {
+            name: "retry",
+            description: "Re-dispatch the same kind/target as a previous run",
+            args: { name: "run-id", description: "Numeric run id from `baywatch logs`", isOptional: false },
+        },
+        {
+            name: "open",
+            description: "Open the most relevant artifact for a run (review .md or agent clone)",
+            args: { name: "run-id", description: "Numeric run id from `baywatch logs`", isOptional: false },
+        },
+        {
             name: "notes",
             description: "Free-form notes injected into the agent prompt for a REF",
             args: { name: "ref", description: "owner/repo#num", isOptional: false },

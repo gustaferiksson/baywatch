@@ -46,10 +46,11 @@ function migrate(db: Database): void {
         );
     `)
 
-    // For databases created before agent_clone_path / review_path existed, add the columns idempotently.
+    // For databases created before later columns existed, add them idempotently.
     const cols = (db.query("PRAGMA table_info(runs)").all() as { name: string }[]).map((c) => c.name)
     if (!cols.includes("agent_clone_path")) db.exec("ALTER TABLE runs ADD COLUMN agent_clone_path TEXT")
     if (!cols.includes("review_path")) db.exec("ALTER TABLE runs ADD COLUMN review_path TEXT")
+    if (!cols.includes("error_summary")) db.exec("ALTER TABLE runs ADD COLUMN error_summary TEXT")
 }
 
 export type ReviewRecord = {
@@ -119,6 +120,7 @@ export type RunRecord = {
     logPath: string | null
     agentClonePath: string | null
     reviewPath: string | null
+    errorSummary: string | null
 }
 
 type RunRow = {
@@ -133,6 +135,7 @@ type RunRow = {
     log_path: string | null
     agent_clone_path: string | null
     review_path: string | null
+    error_summary: string | null
 }
 
 function rowToRun(row: RunRow): RunRecord {
@@ -148,6 +151,7 @@ function rowToRun(row: RunRow): RunRecord {
         logPath: row.log_path,
         agentClonePath: row.agent_clone_path,
         reviewPath: row.review_path,
+        errorSummary: row.error_summary,
     }
 }
 
@@ -175,11 +179,20 @@ export function startRun(opts: {
     return Number(result.lastInsertRowid)
 }
 
-export function completeRun(id: number, opts: { status: RunStatus; logPath?: string | null }): void {
+export function completeRun(
+    id: number,
+    opts: { status: RunStatus; logPath?: string | null; errorSummary?: string | null }
+): void {
     const stmt = getDb().query(
-        `UPDATE runs SET status = ?, finished_at = ?, log_path = COALESCE(?, log_path) WHERE id = ?`
+        `UPDATE runs SET status = ?, finished_at = ?, log_path = COALESCE(?, log_path), error_summary = COALESCE(?, error_summary) WHERE id = ?`
     )
-    stmt.run(opts.status, Date.now(), opts.logPath ?? null, id)
+    stmt.run(opts.status, Date.now(), opts.logPath ?? null, opts.errorSummary ?? null, id)
+}
+
+export function getRun(id: number): RunRecord | null {
+    const stmt = getDb().query(`SELECT * FROM runs WHERE id = ?`)
+    const row = stmt.get(id) as RunRow | null
+    return row ? rowToRun(row) : null
 }
 
 export function listRuns(opts: { limit?: number; status?: RunStatus } = {}): RunRecord[] {

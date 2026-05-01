@@ -121,7 +121,7 @@ export async function solveIssue(opts: {
 
         completeRun(runId, { status: "success", logPath: result.logFilePath ?? null })
     } catch (err) {
-        completeRun(runId, { status: "failed" })
+        completeRun(runId, { status: "failed", errorSummary: (err as Error).message })
         throw err
     }
 }

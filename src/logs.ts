@@ -10,6 +10,7 @@ export type LogEntry = {
     startedAt: Date
     finishedAt: Date | null
     logPath: string | null
+    errorSummary: string | null
 }
 
 export function listRecentLogs(opts: { limit?: number; status?: RunRecord["status"] } = {}): LogEntry[] {
@@ -23,6 +24,7 @@ export function listRecentLogs(opts: { limit?: number; status?: RunRecord["statu
         startedAt: new Date(r.startedAt),
         finishedAt: r.finishedAt ? new Date(r.finishedAt) : null,
         logPath: r.logPath,
+        errorSummary: r.errorSummary,
     }))
 }
 

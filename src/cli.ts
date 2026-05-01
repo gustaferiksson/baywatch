@@ -4,10 +4,12 @@ import { solveIssue } from "./agents/solve-issue.ts"
 import { formatSize, listCloneCandidates, parseDuration, removeClone } from "./clean.ts"
 import { BAYWATCH_ROOT, loadConfig } from "./config.ts"
 import { discoverIssues, discoverPRs } from "./discovery.ts"
+import { printDoctorReport, runDoctor } from "./doctor.ts"
 import { installSpecs } from "./install-specs.ts"
 import { formatAge, formatDuration, listRecentLogs } from "./logs.ts"
 import { noteFilePath, readNote, writeNote } from "./notes.ts"
 import { pickIssues, pickPRs } from "./picker.ts"
+import { getRun } from "./state.ts"
 
 const HELP = `baywatch — personal agent orchestrator
 
@@ -23,6 +25,9 @@ COMMANDS
   image-build                                                 Rebuild the baywatch-agent podman image
   clean clones [--older-than 14d] [--dry-run]                 Remove ~/.baywatch/clones/ entries older than threshold (skips in-flight)
   notes <REF> [--print | --path | --write]                    Free-form notes injected into the agent prompt for this REF
+  doctor                                                      Pre-flight: gh auth, podman machine, image, env tokens, config
+  retry <id>                                                  Re-dispatch the same kind/target as run <id>
+  open <id>                                                   Open the most relevant artifact for run <id> (review .md or agent clone)
   install-specs                                               Build & install Fig autocomplete spec
   -h, --help                                                  Show this help
 
@@ -249,6 +254,46 @@ const runClean = (argv: string[]): void => {
     console.log(`\n✓ Removed ${removable.length} clone(s), reclaimed ${formatSize(totalBytes)}.`)
 }
 
+const parseRunId = (raw: string | undefined): number => {
+    if (!raw) throw new Error("run id required")
+    const n = Number.parseInt(raw, 10)
+    if (Number.isNaN(n) || n < 1) throw new Error(`bad run id: ${raw}`)
+    return n
+}
+
+const runRetry = async (argv: string[]): Promise<void> => {
+    const id = parseRunId(argv[0])
+    const run = getRun(id)
+    if (!run) throw new Error(`no run with id ${id}`)
+    const m = run.target.match(/^(issue|pr)-(\d+)$/)
+    if (!m?.[1] || !m[2]) throw new Error(`run #${id} has unrecognised target ${run.target}`)
+    const ref = `${run.ownerRepo}#${m[2]}`
+    const cmd = run.kind === "dev" ? "dev" : "review"
+    console.log(`retrying #${id}: baywatch ${cmd} --only ${ref}`)
+    const proc = Bun.spawn(["baywatch", cmd, "--only", ref], { stdout: "inherit", stderr: "inherit", stdin: "inherit" })
+    const code = await proc.exited
+    if (code !== 0) process.exit(code)
+}
+
+const runOpen = async (argv: string[]): Promise<void> => {
+    const id = parseRunId(argv[0])
+    const run = getRun(id)
+    if (!run) throw new Error(`no run with id ${id}`)
+    const target = run.kind === "review" ? run.reviewPath : run.agentClonePath
+    if (!target) {
+        console.log(`run #${id} has no ${run.kind === "review" ? "review markdown" : "agent clone"} recorded.`)
+        if (run.logPath) console.log(`(log file: ${run.logPath})`)
+        return
+    }
+    // `code` opens files or folders depending on the path type
+    const proc = Bun.spawn(["code", target], { stdout: "inherit", stderr: "inherit" })
+    const code = await proc.exited
+    if (code !== 0) {
+        // Fallback to `open` (macOS) so users without `code` on PATH still get something.
+        Bun.spawn(["open", target], { stdout: "inherit", stderr: "inherit" })
+    }
+}
+
 const runNotes = async (argv: string[]): Promise<void> => {
     const first = argv[0]
     if (first === undefined || first === "-h" || first === "--help") {
@@ -379,6 +424,7 @@ const printRun = (log: ReturnType<typeof listRecentLogs>[number]): void => {
     const status = log.status.padEnd(7)
     console.log(`#${String(log.runId).padEnd(4)} ${age} ${dur} [${kind}] [${status}] ${log.ownerRepo} ${log.target}`)
     if (log.logPath) console.log(`              ${log.logPath}`)
+    if (log.status === "failed" && log.errorSummary) console.log(`              error: ${log.errorSummary}`)
 }
 
 const argv = process.argv.slice(2)
@@ -416,6 +462,18 @@ try {
             break
         case "notes":
             await runNotes(argv.slice(1))
+            break
+        case "doctor": {
+            const result = await runDoctor()
+            printDoctorReport(result)
+            if (!result.ok) process.exit(1)
+            break
+        }
+        case "retry":
+            await runRetry(argv.slice(1))
+            break
+        case "open":
+            await runOpen(argv.slice(1))
             break
         case "install-specs":
             await installSpecs()

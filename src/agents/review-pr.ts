@@ -112,7 +112,7 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
 
         completeRun(runId, { status: "success", logPath: result.logFilePath ?? null })
     } catch (err) {
-        completeRun(runId, { status: "failed" })
+        completeRun(runId, { status: "failed", errorSummary: (err as Error).message })
         throw err
     }
 }
