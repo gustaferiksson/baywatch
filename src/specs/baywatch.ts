@@ -163,6 +163,24 @@ const completionSpec: Fig.Spec = {
             description: "Rebuild the baywatch-agent podman image from baywatch's Containerfile",
         },
         {
+            name: "clean",
+            description: "Cleanup commands for baywatch's local state",
+            subcommands: [
+                {
+                    name: "clones",
+                    description: "Remove ~/.baywatch/clones/ entries older than --older-than (skips in-flight)",
+                    options: [
+                        {
+                            name: "--older-than",
+                            description: "Age threshold (e.g. 14d, 24h, 30m, 60s)",
+                            args: { name: "duration", suggestions: ["7d", "14d", "30d", "24h"] },
+                        },
+                        { name: "--dry-run", description: "List what would be removed without removing" },
+                    ],
+                },
+            ],
+        },
+        {
             name: "install-specs",
             description: "Build & install this Fig autocomplete spec to ~/.fig/autocomplete/build",
         },

@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { reviewPR } from "./agents/review-pr.ts"
 import { solveIssue } from "./agents/solve-issue.ts"
+import { formatSize, listCloneCandidates, parseDuration, removeClone } from "./clean.ts"
 import { BAYWATCH_ROOT, loadConfig } from "./config.ts"
 import { discoverIssues, discoverPRs } from "./discovery.ts"
 import { installSpecs } from "./install-specs.ts"
@@ -19,6 +20,7 @@ COMMANDS
   review [--dry-run] [--only] [--auto] [--limit N] [REF ...]  Run the review agent (no args + TTY → picker)
   logs [<id>] [--follow] [--running] [--json] [--limit N]     Recent agent run logs (id picks one; --follow tails; --json for tooling)
   image-build                                                 Rebuild the baywatch-agent podman image
+  clean clones [--older-than 14d] [--dry-run]                 Remove ~/.baywatch/clones/ entries older than threshold (skips in-flight)
   install-specs                                               Build & install Fig autocomplete spec
   -h, --help                                                  Show this help
 
@@ -197,6 +199,54 @@ const runReview = async (opts: RunOpts): Promise<void> => {
     for (const pr of prs) await reviewPR({ pr, config: cfg, dryRun: opts.dryRun })
 }
 
+const runClean = (argv: string[]): void => {
+    const sub = argv[0]
+    if (sub !== "clones") {
+        throw new Error(`unknown 'clean' subcommand: ${sub ?? "(missing)"} — expected 'clones'`)
+    }
+    let olderThan = "14d"
+    let dryRun = false
+    for (let i = 1; i < argv.length; i++) {
+        const a = argv[i]
+        if (a === "--dry-run") dryRun = true
+        else if (a === "--older-than") {
+            const v = argv[i + 1]
+            if (v === undefined) throw new Error("--older-than requires a value (e.g. 14d, 24h, 30m)")
+            olderThan = v
+            i++
+        } else if (a === "-h" || a === "--help") printHelpAndExit()
+        else throw new Error(`unknown 'clean clones' arg: ${a}`)
+    }
+
+    const olderThanMs = parseDuration(olderThan)
+    const candidates = listCloneCandidates({ olderThanMs, dryRun })
+    if (candidates.length === 0) {
+        console.log(`No clones older than ${olderThan} in ~/.baywatch/clones/.`)
+        return
+    }
+
+    const removable = candidates.filter((c) => !c.inUse)
+    const skipped = candidates.filter((c) => c.inUse)
+    const totalBytes = removable.reduce((sum, c) => sum + c.sizeBytes, 0)
+
+    console.log(`${removable.length} clone(s) older than ${olderThan} (${formatSize(totalBytes)}):`)
+    for (const c of removable) {
+        const age = Math.floor((Date.now() - c.mtime.getTime()) / 86_400_000)
+        console.log(`  ${age.toString().padStart(3)}d  ${formatSize(c.sizeBytes).padEnd(8)}  ${c.path}`)
+    }
+    if (skipped.length > 0) {
+        console.log(`\nSkipping ${skipped.length} clone(s) tied to in-flight runs:`)
+        for (const c of skipped) console.log(`  (in-use)  ${c.path}`)
+    }
+
+    if (dryRun) {
+        console.log("\n(dry-run) nothing removed.")
+        return
+    }
+    for (const c of removable) removeClone(c)
+    console.log(`\n✓ Removed ${removable.length} clone(s), reclaimed ${formatSize(totalBytes)}.`)
+}
+
 const runImageBuild = async (): Promise<void> => {
     const containerfile = `${BAYWATCH_ROOT}/Containerfile`
     console.log(`Building baywatch-agent from ${containerfile}`)
@@ -321,6 +371,9 @@ try {
             break
         case "image-build":
             await runImageBuild()
+            break
+        case "clean":
+            runClean(argv.slice(1))
             break
         case "install-specs":
             await installSpecs()
