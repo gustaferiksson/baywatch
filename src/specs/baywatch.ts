@@ -53,6 +53,7 @@ const completionSpec: Fig.Spec = {
             description: "Recent agent run logs",
             options: [
                 { name: ["--follow", "-f"], description: "Tail the most recent log" },
+                { name: "--running", description: "Filter to in-flight runs" },
                 {
                     name: "--limit",
                     description: "How many recent logs to list",

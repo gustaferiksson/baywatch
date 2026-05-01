@@ -1,50 +1,29 @@
-import { existsSync, readdirSync, statSync } from "node:fs"
-import { homedir } from "node:os"
-import path from "node:path"
-
-import { loadConfig } from "./config.ts"
+import { listRuns, type RunRecord } from "./state.ts"
 
 export type LogEntry = {
-    path: string
-    name: string
-    mtime: Date
-    kind: "dev" | "review"
+    runId: number
+    kind: RunRecord["kind"]
+    status: RunRecord["status"]
+    target: string
+    ownerRepo: string
+    branch: string | null
+    startedAt: Date
+    finishedAt: Date | null
+    logPath: string | null
 }
 
-function readDirOrEmpty(dir: string): string[] {
-    if (!existsSync(dir)) return []
-    return readdirSync(dir)
-}
-
-function listLogsAt(logsDir: string, kind: LogEntry["kind"]): LogEntry[] {
-    return readDirOrEmpty(logsDir)
-        .filter((f) => f.endsWith(".log"))
-        .map((f) => {
-            const p = path.join(logsDir, f)
-            return { path: p, name: f.replace(/\.log$/, ""), mtime: statSync(p).mtime, kind }
-        })
-}
-
-// Find every sandcastle log file across the locations baywatch writes to:
-// - dev runs:    ~/.baywatch/clones/*/.sandcastle/logs/*.log
-// - review runs: <cloneRoot>/<repo>/.sandcastle/logs/*.log  (cwd is the main clone)
-// Sorted newest first.
-export async function listRecentLogs(): Promise<LogEntry[]> {
-    const cfg = await loadConfig()
-    const out: LogEntry[] = []
-
-    const clonesRoot = path.join(homedir(), ".baywatch", "clones")
-    for (const cloneDir of readDirOrEmpty(clonesRoot)) {
-        out.push(...listLogsAt(path.join(clonesRoot, cloneDir, ".sandcastle", "logs"), "dev"))
-    }
-
-    for (const root of cfg.cloneRoots) {
-        for (const repoDir of readDirOrEmpty(root)) {
-            out.push(...listLogsAt(path.join(root, repoDir, ".sandcastle", "logs"), "review"))
-        }
-    }
-
-    return out.sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
+export function listRecentLogs(opts: { limit?: number; status?: RunRecord["status"] } = {}): LogEntry[] {
+    return listRuns(opts).map((r) => ({
+        runId: r.id,
+        kind: r.kind,
+        status: r.status,
+        target: r.target,
+        ownerRepo: r.ownerRepo,
+        branch: r.branch,
+        startedAt: new Date(r.startedAt),
+        finishedAt: r.finishedAt ? new Date(r.finishedAt) : null,
+        logPath: r.logPath,
+    }))
 }
 
 export function formatAge(d: Date): string {
@@ -55,4 +34,16 @@ export function formatAge(d: Date): string {
     const hr = Math.floor(min / 60)
     if (hr < 24) return `${hr}h ago`
     return `${Math.floor(hr / 24)}d ago`
+}
+
+export function formatDuration(start: Date, end: Date | null): string {
+    const ms = (end ?? new Date()).getTime() - start.getTime()
+    const sec = Math.floor(ms / 1000)
+    if (sec < 60) return `${sec}s`
+    const min = Math.floor(sec / 60)
+    const remSec = sec % 60
+    if (min < 60) return `${min}m${remSec.toString().padStart(2, "0")}s`
+    const hr = Math.floor(min / 60)
+    const remMin = min % 60
+    return `${hr}h${remMin.toString().padStart(2, "0")}m`
 }

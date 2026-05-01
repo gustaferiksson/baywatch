@@ -40,9 +40,16 @@ function migrate(db: Database): void {
             started_at INTEGER NOT NULL,
             finished_at INTEGER,
             status TEXT NOT NULL CHECK (status IN ('running', 'success', 'failed', 'cancelled')),
-            log_path TEXT
+            log_path TEXT,
+            agent_clone_path TEXT,
+            review_path TEXT
         );
     `)
+
+    // For databases created before agent_clone_path / review_path existed, add the columns idempotently.
+    const cols = (db.query("PRAGMA table_info(runs)").all() as { name: string }[]).map((c) => c.name)
+    if (!cols.includes("agent_clone_path")) db.exec("ALTER TABLE runs ADD COLUMN agent_clone_path TEXT")
+    if (!cols.includes("review_path")) db.exec("ALTER TABLE runs ADD COLUMN review_path TEXT")
 }
 
 export type ReviewRecord = {
@@ -93,4 +100,94 @@ export function recordReview(rec: Omit<ReviewRecord, "id" | "submittedAt">): voi
          DO UPDATE SET reviewed_at = excluded.reviewed_at, review_path = excluded.review_path`
     )
     stmt.run(rec.ownerRepo, rec.prNumber, rec.headSha, rec.reviewedAt, rec.reviewPath)
+}
+
+// ----- runs -----
+
+export type RunKind = "dev" | "review"
+export type RunStatus = "running" | "success" | "failed" | "cancelled"
+
+export type RunRecord = {
+    id: number
+    kind: RunKind
+    ownerRepo: string
+    target: string
+    branch: string | null
+    startedAt: number
+    finishedAt: number | null
+    status: RunStatus
+    logPath: string | null
+    agentClonePath: string | null
+    reviewPath: string | null
+}
+
+type RunRow = {
+    id: number
+    kind: RunKind
+    owner_repo: string
+    target: string
+    branch: string | null
+    started_at: number
+    finished_at: number | null
+    status: RunStatus
+    log_path: string | null
+    agent_clone_path: string | null
+    review_path: string | null
+}
+
+function rowToRun(row: RunRow): RunRecord {
+    return {
+        id: row.id,
+        kind: row.kind,
+        ownerRepo: row.owner_repo,
+        target: row.target,
+        branch: row.branch,
+        startedAt: row.started_at,
+        finishedAt: row.finished_at,
+        status: row.status,
+        logPath: row.log_path,
+        agentClonePath: row.agent_clone_path,
+        reviewPath: row.review_path,
+    }
+}
+
+export function startRun(opts: {
+    kind: RunKind
+    ownerRepo: string
+    target: string
+    branch?: string | null
+    agentClonePath?: string | null
+    reviewPath?: string | null
+}): number {
+    const stmt = getDb().query(
+        `INSERT INTO runs (kind, owner_repo, target, branch, started_at, status, agent_clone_path, review_path)
+         VALUES (?, ?, ?, ?, ?, 'running', ?, ?)`
+    )
+    const result = stmt.run(
+        opts.kind,
+        opts.ownerRepo,
+        opts.target,
+        opts.branch ?? null,
+        Date.now(),
+        opts.agentClonePath ?? null,
+        opts.reviewPath ?? null
+    )
+    return Number(result.lastInsertRowid)
+}
+
+export function completeRun(id: number, opts: { status: RunStatus; logPath?: string | null }): void {
+    const stmt = getDb().query(
+        `UPDATE runs SET status = ?, finished_at = ?, log_path = COALESCE(?, log_path) WHERE id = ?`
+    )
+    stmt.run(opts.status, Date.now(), opts.logPath ?? null, id)
+}
+
+export function listRuns(opts: { limit?: number; status?: RunStatus } = {}): RunRecord[] {
+    const limit = opts.limit ?? 50
+    const sql = opts.status
+        ? `SELECT * FROM runs WHERE status = ? ORDER BY started_at DESC LIMIT ?`
+        : `SELECT * FROM runs ORDER BY started_at DESC LIMIT ?`
+    const stmt = getDb().query(sql)
+    const rows = (opts.status ? stmt.all(opts.status, limit) : stmt.all(limit)) as RunRow[]
+    return rows.map(rowToRun)
 }

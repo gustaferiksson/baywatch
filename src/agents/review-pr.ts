@@ -7,7 +7,7 @@ import { $ } from "bun"
 import { loadAgentEnv } from "../agentEnv.ts"
 import { BAYWATCH_ROOT, type BaywatchConfig } from "../config.ts"
 import type { DiscoveredPR } from "../discovery.ts"
-import { recordReview } from "../state.ts"
+import { completeRun, recordReview, startRun } from "../state.ts"
 
 const SANDBOX_IMAGE = "baywatch-agent"
 const PROMPT_PATH = path.join(BAYWATCH_ROOT, "prompts", "review-pr.md")
@@ -49,46 +49,63 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
     // from the prompt rather than calling gh inside the container.
     const diff = await $`gh pr diff ${pr.number} --repo ${ownerRepo}`.text()
 
-    const result = await run({
-        agent: claudeCode(config.agent.model),
-        sandbox: podman({
-            imageName: SANDBOX_IMAGE,
-            selinuxLabel: false,
-            env: loadAgentEnv(),
-            mounts: [{ hostPath: REVIEWS_HOST_DIR, sandboxPath: REVIEWS_SANDBOX_DIR }],
-        }),
-        cwd: pr.repoPath,
-        promptFile: PROMPT_PATH,
-        promptArgs: {
-            PR_REPO: ownerRepo,
-            PR_NUMBER: String(pr.number),
-            PR_TITLE: pr.title,
-            PR_BODY: pr.body || "(empty)",
-            PR_URL: pr.url,
-            PR_HEAD_REF: pr.headRefName,
-            PR_BASE_REF: pr.baseRefName,
-            PR_HEAD_OID: pr.headRefOid,
-            PR_DIFF: diff,
-            REVIEW_OUTPUT_PATH: reviewSandboxPath,
-            SUBMIT_SCRIPT_PATH: submitSandboxPath,
-        },
-        branchStrategy: { type: "head" },
-        name: `review-${pr.number}`,
+    const runId = startRun({
+        kind: "review",
+        ownerRepo,
+        target: `pr-${pr.number}`,
+        reviewPath: reviewHostPath,
     })
 
-    console.log(`[review]   done: ${result.iterations.length} iteration(s)`)
-    if (result.logFilePath) console.log(`[review]   log: ${result.logFilePath}`)
-
-    if (existsSync(reviewHostPath)) {
-        recordReview({
-            ownerRepo,
-            prNumber: pr.number,
-            headSha: pr.headRefOid,
-            reviewedAt: Date.now(),
-            reviewPath: reviewHostPath,
+    try {
+        const result = await run({
+            agent: claudeCode(config.agent.model),
+            sandbox: podman({
+                imageName: SANDBOX_IMAGE,
+                selinuxLabel: false,
+                env: loadAgentEnv(),
+                mounts: [{ hostPath: REVIEWS_HOST_DIR, sandboxPath: REVIEWS_SANDBOX_DIR }],
+            }),
+            cwd: pr.repoPath,
+            promptFile: PROMPT_PATH,
+            promptArgs: {
+                PR_REPO: ownerRepo,
+                PR_NUMBER: String(pr.number),
+                PR_TITLE: pr.title,
+                PR_BODY: pr.body || "(empty)",
+                PR_URL: pr.url,
+                PR_HEAD_REF: pr.headRefName,
+                PR_BASE_REF: pr.baseRefName,
+                PR_HEAD_OID: pr.headRefOid,
+                PR_DIFF: diff,
+                REVIEW_OUTPUT_PATH: reviewSandboxPath,
+                SUBMIT_SCRIPT_PATH: submitSandboxPath,
+            },
+            branchStrategy: { type: "head" },
+            name: `review-${pr.number}`,
         })
-        console.log(`[review]   recorded at head ${pr.headRefOid.slice(0, 7)}`)
-    } else {
-        console.warn(`[review]   no review markdown produced at ${reviewHostPath}`)
+
+        console.log(`[review]   done: ${result.iterations.length} iteration(s)`)
+        if (result.logFilePath) {
+            console.log(`[review]   log:   ${result.logFilePath}`)
+            console.log(`[review]   tail:  tail -f ${result.logFilePath}`)
+        }
+
+        if (existsSync(reviewHostPath)) {
+            recordReview({
+                ownerRepo,
+                prNumber: pr.number,
+                headSha: pr.headRefOid,
+                reviewedAt: Date.now(),
+                reviewPath: reviewHostPath,
+            })
+            console.log(`[review]   recorded at head ${pr.headRefOid.slice(0, 7)}`)
+        } else {
+            console.warn(`[review]   no review markdown produced at ${reviewHostPath}`)
+        }
+
+        completeRun(runId, { status: "success", logPath: result.logFilePath ?? null })
+    } catch (err) {
+        completeRun(runId, { status: "failed" })
+        throw err
     }
 }

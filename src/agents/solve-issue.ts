@@ -8,6 +8,7 @@ import { loadAgentEnv } from "../agentEnv.ts"
 import { BAYWATCH_ROOT, type BaywatchConfig } from "../config.ts"
 import type { DiscoveredIssue } from "../discovery.ts"
 import { prepRepo } from "../prep.ts"
+import { completeRun, startRun } from "../state.ts"
 
 const SANDBOX_IMAGE = "baywatch-agent"
 const PROMPT_PATH = path.join(BAYWATCH_ROOT, "prompts", "solve-issue.md")
@@ -60,42 +61,57 @@ export async function solveIssue(opts: {
 
     const hooks = prep.installCmd ? { sandbox: { onSandboxReady: [{ command: prep.installCmd }] } } : undefined
 
-    const result = await run({
-        agent: claudeCode(config.agent.model),
-        sandbox: podman({ imageName: SANDBOX_IMAGE, selinuxLabel: false, env: loadAgentEnv() }),
-        cwd: clone.path,
-        promptFile: PROMPT_PATH,
-        promptArgs: {
-            ISSUE_REPO: ownerRepo,
-            ISSUE_NUMBER: String(issue.number),
-            ISSUE_TITLE: issue.title,
-            ISSUE_BODY: issue.body || "(empty)",
-            ISSUE_URL: issue.url,
-            BRANCH_NAME: branchName,
-            DEFAULT_BRANCH: prep.defaultBranch,
-        },
-        branchStrategy: { type: "head" },
-        ...(hooks ? { hooks } : {}),
-        name: `issue-${issue.number}`,
+    const runId = startRun({
+        kind: "dev",
+        ownerRepo,
+        target: `issue-${issue.number}`,
+        branch: branchName,
+        agentClonePath: clone.path,
     })
 
-    console.log(`[dev]   done: ${result.commits.length} commit(s) on ${result.branch}`)
-    if (result.completionSignal) console.log(`[dev]   signal: ${result.completionSignal}`)
-    if (result.logFilePath) {
-        console.log(`[dev]   log:   ${result.logFilePath}`)
-        console.log(`[dev]   tail:  tail -f ${result.logFilePath}`)
-    }
+    try {
+        const result = await run({
+            agent: claudeCode(config.agent.model),
+            sandbox: podman({ imageName: SANDBOX_IMAGE, selinuxLabel: false, env: loadAgentEnv() }),
+            cwd: clone.path,
+            promptFile: PROMPT_PATH,
+            promptArgs: {
+                ISSUE_REPO: ownerRepo,
+                ISSUE_NUMBER: String(issue.number),
+                ISSUE_TITLE: issue.title,
+                ISSUE_BODY: issue.body || "(empty)",
+                ISSUE_URL: issue.url,
+                BRANCH_NAME: branchName,
+                DEFAULT_BRANCH: prep.defaultBranch,
+            },
+            branchStrategy: { type: "head" },
+            ...(hooks ? { hooks } : {}),
+            name: `issue-${issue.number}`,
+        })
 
-    await migrateSessionToMainClone({ result, clone })
+        console.log(`[dev]   done: ${result.commits.length} commit(s) on ${result.branch}`)
+        if (result.completionSignal) console.log(`[dev]   signal: ${result.completionSignal}`)
+        if (result.logFilePath) {
+            console.log(`[dev]   log:   ${result.logFilePath}`)
+            console.log(`[dev]   tail:  tail -f ${result.logFilePath}`)
+        }
 
-    if (result.commits.length > 0) {
-        await pushBranchToMain(clone)
-        console.log(`[dev]   branch ${clone.branch} fetched into ${clone.mainClonePath}`)
-        console.log(
-            `[dev]   inspect:  cd ${clone.path}   (or)   git -C ${clone.mainClonePath} checkout ${clone.branch}`
-        )
-    } else {
-        console.log(`[dev]   no commits — agent clone left at ${clone.path} for inspection`)
+        await migrateSessionToMainClone({ result, clone })
+
+        if (result.commits.length > 0) {
+            await pushBranchToMain(clone)
+            console.log(`[dev]   branch ${clone.branch} fetched into ${clone.mainClonePath}`)
+            console.log(
+                `[dev]   inspect:  cd ${clone.path}   (or)   git -C ${clone.mainClonePath} checkout ${clone.branch}`
+            )
+        } else {
+            console.log(`[dev]   no commits — agent clone left at ${clone.path} for inspection`)
+        }
+
+        completeRun(runId, { status: "success", logPath: result.logFilePath ?? null })
+    } catch (err) {
+        completeRun(runId, { status: "failed" })
+        throw err
     }
 }
 

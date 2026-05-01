@@ -4,7 +4,7 @@ import { solveIssue } from "./agents/solve-issue.ts"
 import { loadConfig } from "./config.ts"
 import { discoverIssues, discoverPRs } from "./discovery.ts"
 import { installSpecs } from "./install-specs.ts"
-import { formatAge, listRecentLogs } from "./logs.ts"
+import { formatAge, formatDuration, listRecentLogs } from "./logs.ts"
 
 const HELP = `baywatch — personal agent orchestrator
 
@@ -16,7 +16,7 @@ COMMANDS
   list prs [REF ...]                                          PRs assigned + review-requested (+ ad-hoc refs)
   dev [--dry-run] [--only] [--limit N] [REF ...]              Run the dev agent
   review [--dry-run] [--only] [--limit N] [REF ...]           Run the review agent
-  logs [--follow] [--limit N]                                 Recent agent run logs (--follow tails the latest)
+  logs [--follow] [--running] [--limit N]                     Recent agent run logs (--follow tails latest, --running filters to in-flight)
   install-specs                                               Build & install Fig autocomplete spec
   -h, --help                                                  Show this help
 
@@ -130,12 +130,14 @@ const runReview = async (opts: RunOpts): Promise<void> => {
     for (const pr of prs) await reviewPR({ pr, config: cfg, dryRun: opts.dryRun })
 }
 
-const runLogs = async (argv: string[]): Promise<void> => {
+const runLogs = (argv: string[]): Promise<void> => {
     let follow = false
     let limit = 10
+    let onlyRunning = false
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i]
         if (a === "-f" || a === "--follow") follow = true
+        else if (a === "--running") onlyRunning = true
         else if (a === "--limit") {
             const v = argv[i + 1]
             if (v === undefined) throw new Error("--limit requires a value")
@@ -147,25 +149,34 @@ const runLogs = async (argv: string[]): Promise<void> => {
         else throw new Error(`unknown 'logs' arg: ${a}`)
     }
 
-    const logs = await listRecentLogs()
+    const logs = listRecentLogs({ limit, ...(onlyRunning ? { status: "running" as const } : {}) })
     if (logs.length === 0) {
-        console.log("No logs found.")
-        return
+        console.log("No runs found.")
+        return Promise.resolve()
     }
 
     if (follow) {
-        const latest = logs[0]
-        if (!latest) throw new Error("No logs found")
-        console.log(`Tailing ${latest.path}\n`)
-        const proc = Bun.spawn(["tail", "-f", latest.path], { stdout: "inherit", stderr: "inherit" })
-        await proc.exited
-        return
+        const latest = logs.find((l) => l.logPath)
+        if (!latest?.logPath) {
+            console.log("No log file available yet for the most recent run.")
+            return Promise.resolve()
+        }
+        console.log(`Tailing ${latest.logPath}\n`)
+        const proc = Bun.spawn(["tail", "-f", latest.logPath], { stdout: "inherit", stderr: "inherit" })
+        return proc.exited.then(() => undefined)
     }
 
-    for (const log of logs.slice(0, limit)) {
-        console.log(`${formatAge(log.mtime).padEnd(10)} [${log.kind.padEnd(6)}]  ${log.name}`)
-        console.log(`             ${log.path}`)
+    for (const log of logs) {
+        const age = formatAge(log.startedAt).padEnd(9)
+        const dur = formatDuration(log.startedAt, log.finishedAt).padEnd(7)
+        const kind = log.kind.padEnd(6)
+        const status = log.status.padEnd(7)
+        console.log(
+            `#${String(log.runId).padEnd(4)} ${age} ${dur} [${kind}] [${status}] ${log.ownerRepo} ${log.target}`
+        )
+        if (log.logPath) console.log(`              ${log.logPath}`)
     }
+    return Promise.resolve()
 }
 
 const argv = process.argv.slice(2)
