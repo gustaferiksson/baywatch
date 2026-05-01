@@ -5,7 +5,10 @@ import { claudeCode, run } from "@ai-hero/sandcastle"
 import { podman } from "@ai-hero/sandcastle/sandboxes/podman"
 import { $ } from "bun"
 
-import { loadAgentAuthEnv } from "../agentEnv.ts"
+import { loadAgentEnv } from "../agentEnv.ts"
+
+const SANDBOX_IMAGE = "baywatch-agent"
+
 import type { BaywatchConfig } from "../config.ts"
 import type { DiscoveredPR } from "../discovery.ts"
 import { recordReview } from "../state.ts"
@@ -52,7 +55,8 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
     const result = await run({
         agent: claudeCode(config.agent.model),
         sandbox: podman({
-            env: loadAgentAuthEnv(),
+            imageName: SANDBOX_IMAGE,
+            env: loadAgentEnv(),
             mounts: [{ hostPath: REVIEWS_HOST_DIR, sandboxPath: REVIEWS_SANDBOX_DIR }],
         }),
         cwd: pr.repoPath,

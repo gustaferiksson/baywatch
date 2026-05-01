@@ -3,7 +3,10 @@ import { fileURLToPath } from "node:url"
 import { claudeCode, run } from "@ai-hero/sandcastle"
 import { podman } from "@ai-hero/sandcastle/sandboxes/podman"
 
-import { loadAgentAuthEnv } from "../agentEnv.ts"
+import { loadAgentEnv } from "../agentEnv.ts"
+
+const SANDBOX_IMAGE = "baywatch-agent"
+
 import type { BaywatchConfig } from "../config.ts"
 import type { DiscoveredIssue } from "../discovery.ts"
 import { prepRepo } from "../prep.ts"
@@ -50,7 +53,7 @@ export async function solveIssue(opts: {
 
     const result = await run({
         agent: claudeCode(config.agent.model),
-        sandbox: podman({ env: loadAgentAuthEnv() }),
+        sandbox: podman({ imageName: SANDBOX_IMAGE, env: loadAgentEnv() }),
         cwd: prep.repoPath,
         promptFile: PROMPT_PATH,
         promptArgs: {

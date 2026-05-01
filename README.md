@@ -43,12 +43,24 @@ For the **review agent**, per PR:
 
 ```bash
 bun install
-cp .env.example .env                            # then add ANTHROPIC_API_KEY
+bun install -g .                                  # makes `baywatch` callable from anywhere
+cp .env.example .env                              # then add CLAUDE_CODE_OAUTH_TOKEN (and optionally GITHUB_TOKEN)
 cp baywatch.config.example.ts baywatch.config.ts  # then point cloneRoots at your dirs
-gh auth status                                   # confirm gh is authed
+gh auth status                                    # confirm gh is authed (host-side)
+
+# Build the shared sandbox image (one time, ~2 min).
+podman machine start                              # if not already running
+podman build -t baywatch-agent -f Containerfile .
 ```
 
 `baywatch.config.ts` is gitignored — your real paths stay on your machine.
+
+### Auth tokens
+
+Two env vars matter:
+
+- **`CLAUDE_CODE_OAUTH_TOKEN`** (required) — get with `claude setup-token`. Bills your Claude subscription rather than per-token API credits. Falls back to `ANTHROPIC_API_KEY` if you'd rather use API auth.
+- **`GITHUB_TOKEN`** (optional) — fine-grained PAT with **read-only** scopes (Contents: read, Issues: read, PRs: read, Metadata: read). The agent's `gh` inside the sandbox uses this. Read-only at the token level means even if the harness deny rules slipped, gh writes would 401 at GitHub. Without it, the agent has no GH access inside the sandbox and works only from the data baywatch pre-loaded into the prompt.
 
 ## Commands
 
