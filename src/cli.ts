@@ -4,6 +4,7 @@ import { solveIssue } from "./agents/solve-issue.ts"
 import { loadConfig } from "./config.ts"
 import { discoverIssues, discoverPRs } from "./discovery.ts"
 import { installSpecs } from "./install-specs.ts"
+import { formatAge, listRecentLogs } from "./logs.ts"
 
 const HELP = `baywatch — personal agent orchestrator
 
@@ -15,6 +16,7 @@ COMMANDS
   list prs [REF ...]                                          PRs assigned + review-requested (+ ad-hoc refs)
   dev [--dry-run] [--only] [--limit N] [REF ...]              Run the dev agent
   review [--dry-run] [--only] [--limit N] [REF ...]           Run the review agent
+  logs [--follow] [--limit N]                                 Recent agent run logs (--follow tails the latest)
   install-specs                                               Build & install Fig autocomplete spec
   -h, --help                                                  Show this help
 
@@ -128,6 +130,44 @@ const runReview = async (opts: RunOpts): Promise<void> => {
     for (const pr of prs) await reviewPR({ pr, config: cfg, dryRun: opts.dryRun })
 }
 
+const runLogs = async (argv: string[]): Promise<void> => {
+    let follow = false
+    let limit = 10
+    for (let i = 0; i < argv.length; i++) {
+        const a = argv[i]
+        if (a === "-f" || a === "--follow") follow = true
+        else if (a === "--limit") {
+            const v = argv[i + 1]
+            if (v === undefined) throw new Error("--limit requires a value")
+            const n = Number.parseInt(v, 10)
+            if (Number.isNaN(n) || n < 1) throw new Error(`--limit must be a positive integer, got ${v}`)
+            limit = n
+            i++
+        } else if (a === "-h" || a === "--help") printHelpAndExit()
+        else throw new Error(`unknown 'logs' arg: ${a}`)
+    }
+
+    const logs = await listRecentLogs()
+    if (logs.length === 0) {
+        console.log("No logs found.")
+        return
+    }
+
+    if (follow) {
+        const latest = logs[0]
+        if (!latest) throw new Error("No logs found")
+        console.log(`Tailing ${latest.path}\n`)
+        const proc = Bun.spawn(["tail", "-f", latest.path], { stdout: "inherit", stderr: "inherit" })
+        await proc.exited
+        return
+    }
+
+    for (const log of logs.slice(0, limit)) {
+        console.log(`${formatAge(log.mtime).padEnd(10)} [${log.kind.padEnd(6)}]  ${log.name}`)
+        console.log(`             ${log.path}`)
+    }
+}
+
 const argv = process.argv.slice(2)
 const cmd = argv[0]
 
@@ -147,6 +187,9 @@ try {
             break
         case "review":
             await runReview(parseRunOpts(argv.slice(1)))
+            break
+        case "logs":
+            await runLogs(argv.slice(1))
             break
         case "install-specs":
             await installSpecs()

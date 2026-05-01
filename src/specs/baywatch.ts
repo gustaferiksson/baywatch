@@ -49,6 +49,18 @@ const completionSpec: Fig.Spec = {
             args: { name: "ref", description: "owner/repo#num", isOptional: true, isVariadic: true },
         },
         {
+            name: "logs",
+            description: "Recent agent run logs",
+            options: [
+                { name: ["--follow", "-f"], description: "Tail the most recent log" },
+                {
+                    name: "--limit",
+                    description: "How many recent logs to list",
+                    args: { name: "n", suggestions: ["5", "10", "25"] },
+                },
+            ],
+        },
+        {
             name: "install-specs",
             description: "Build & install this Fig autocomplete spec to ~/.fig/autocomplete/build",
         },
