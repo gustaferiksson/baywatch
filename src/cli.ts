@@ -16,7 +16,7 @@ COMMANDS
   list prs [REF ...]                                          PRs assigned + review-requested (+ ad-hoc refs)
   dev [--dry-run] [--only] [--limit N] [REF ...]              Run the dev agent
   review [--dry-run] [--only] [--limit N] [REF ...]           Run the review agent
-  logs [--follow] [--running] [--limit N]                     Recent agent run logs (--follow tails latest, --running filters to in-flight)
+  logs [<id>] [--follow] [--running] [--json] [--limit N]     Recent agent run logs (id picks one; --follow tails; --json for tooling)
   install-specs                                               Build & install Fig autocomplete spec
   -h, --help                                                  Show this help
 
@@ -134,10 +134,13 @@ const runLogs = (argv: string[]): Promise<void> => {
     let follow = false
     let limit = 10
     let onlyRunning = false
+    let json = false
+    let runId: number | null = null
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i]
         if (a === "-f" || a === "--follow") follow = true
         else if (a === "--running") onlyRunning = true
+        else if (a === "--json") json = true
         else if (a === "--limit") {
             const v = argv[i + 1]
             if (v === undefined) throw new Error("--limit requires a value")
@@ -146,10 +149,40 @@ const runLogs = (argv: string[]): Promise<void> => {
             limit = n
             i++
         } else if (a === "-h" || a === "--help") printHelpAndExit()
-        else throw new Error(`unknown 'logs' arg: ${a}`)
+        else if (a !== undefined && !a.startsWith("-")) {
+            const n = Number.parseInt(a, 10)
+            if (Number.isNaN(n)) throw new Error(`expected a numeric run id, got ${a}`)
+            runId = n
+        } else throw new Error(`unknown 'logs' arg: ${a}`)
     }
 
     const logs = listRecentLogs({ limit, ...(onlyRunning ? { status: "running" as const } : {}) })
+
+    if (runId !== null) {
+        const target = logs.find((l) => l.runId === runId)
+        if (!target) throw new Error(`no run with id ${runId} (try \`baywatch logs --limit 50\`)`)
+        if (json) {
+            process.stdout.write(`${JSON.stringify(target, null, 2)}\n`)
+            return Promise.resolve()
+        }
+        if (follow) {
+            if (!target.logPath) {
+                console.log(`Run #${runId} has no log file yet.`)
+                return Promise.resolve()
+            }
+            console.log(`Tailing ${target.logPath}\n`)
+            const proc = Bun.spawn(["tail", "-f", target.logPath], { stdout: "inherit", stderr: "inherit" })
+            return proc.exited.then(() => undefined)
+        }
+        printRun(target)
+        return Promise.resolve()
+    }
+
+    if (json) {
+        process.stdout.write(`${JSON.stringify(logs, null, 2)}\n`)
+        return Promise.resolve()
+    }
+
     if (logs.length === 0) {
         console.log("No runs found.")
         return Promise.resolve()
@@ -166,17 +199,17 @@ const runLogs = (argv: string[]): Promise<void> => {
         return proc.exited.then(() => undefined)
     }
 
-    for (const log of logs) {
-        const age = formatAge(log.startedAt).padEnd(9)
-        const dur = formatDuration(log.startedAt, log.finishedAt).padEnd(7)
-        const kind = log.kind.padEnd(6)
-        const status = log.status.padEnd(7)
-        console.log(
-            `#${String(log.runId).padEnd(4)} ${age} ${dur} [${kind}] [${status}] ${log.ownerRepo} ${log.target}`
-        )
-        if (log.logPath) console.log(`              ${log.logPath}`)
-    }
+    for (const log of logs) printRun(log)
     return Promise.resolve()
+}
+
+const printRun = (log: ReturnType<typeof listRecentLogs>[number]): void => {
+    const age = formatAge(log.startedAt).padEnd(9)
+    const dur = formatDuration(log.startedAt, log.finishedAt).padEnd(7)
+    const kind = log.kind.padEnd(6)
+    const status = log.status.padEnd(7)
+    console.log(`#${String(log.runId).padEnd(4)} ${age} ${dur} [${kind}] [${status}] ${log.ownerRepo} ${log.target}`)
+    if (log.logPath) console.log(`              ${log.logPath}`)
 }
 
 const argv = process.argv.slice(2)

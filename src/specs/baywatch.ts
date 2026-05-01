@@ -51,9 +51,37 @@ const completionSpec: Fig.Spec = {
         {
             name: "logs",
             description: "Recent agent run logs",
+            args: {
+                name: "run-id",
+                description: "Show or tail a specific run (numeric id from `baywatch logs`)",
+                isOptional: true,
+                generators: {
+                    script: ["sh", "-c", "baywatch logs --json --limit 50 2>/dev/null"],
+                    cache: { ttl: 5_000 },
+                    postProcess: (out: string) => {
+                        try {
+                            const runs = JSON.parse(out) as Array<{
+                                runId: number
+                                kind: string
+                                status: string
+                                ownerRepo: string
+                                target: string
+                            }>
+                            return runs.map((r) => ({
+                                name: String(r.runId),
+                                description: `[${r.kind}] [${r.status}] ${r.ownerRepo} ${r.target}`,
+                                priority: r.status === "running" ? 100 : 80,
+                            }))
+                        } catch {
+                            return []
+                        }
+                    },
+                },
+            },
             options: [
-                { name: ["--follow", "-f"], description: "Tail the most recent log" },
+                { name: ["--follow", "-f"], description: "Tail the log (latest if no id, otherwise the given run)" },
                 { name: "--running", description: "Filter to in-flight runs" },
+                { name: "--json", description: "Emit JSON (used by tooling and Fig completions)" },
                 {
                     name: "--limit",
                     description: "How many recent logs to list",
