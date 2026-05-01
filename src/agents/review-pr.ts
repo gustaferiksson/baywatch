@@ -1,20 +1,17 @@
 import { existsSync, mkdirSync } from "node:fs"
 import path from "node:path"
-import { fileURLToPath } from "node:url"
 import { claudeCode, run } from "@ai-hero/sandcastle"
 import { podman } from "@ai-hero/sandcastle/sandboxes/podman"
 import { $ } from "bun"
 
 import { loadAgentEnv } from "../agentEnv.ts"
-
-const SANDBOX_IMAGE = "baywatch-agent"
-
-import type { BaywatchConfig } from "../config.ts"
+import { BAYWATCH_ROOT, type BaywatchConfig } from "../config.ts"
 import type { DiscoveredPR } from "../discovery.ts"
 import { recordReview } from "../state.ts"
 
-const PROMPT_PATH = path.resolve(fileURLToPath(new URL("../..", import.meta.url)), "prompts", "review-pr.md")
-const REVIEWS_HOST_DIR = path.resolve(process.cwd(), "reviews")
+const SANDBOX_IMAGE = "baywatch-agent"
+const PROMPT_PATH = path.join(BAYWATCH_ROOT, "prompts", "review-pr.md")
+const REVIEWS_HOST_DIR = path.join(BAYWATCH_ROOT, "reviews")
 const REVIEWS_SANDBOX_DIR = "/baywatch-reviews"
 
 export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig; dryRun: boolean }): Promise<void> {

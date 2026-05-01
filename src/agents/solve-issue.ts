@@ -1,17 +1,14 @@
 import path from "node:path"
-import { fileURLToPath } from "node:url"
 import { claudeCode, run } from "@ai-hero/sandcastle"
 import { podman } from "@ai-hero/sandcastle/sandboxes/podman"
 
 import { loadAgentEnv } from "../agentEnv.ts"
-
-const SANDBOX_IMAGE = "baywatch-agent"
-
-import type { BaywatchConfig } from "../config.ts"
+import { BAYWATCH_ROOT, type BaywatchConfig } from "../config.ts"
 import type { DiscoveredIssue } from "../discovery.ts"
 import { prepRepo } from "../prep.ts"
 
-const PROMPT_PATH = path.resolve(fileURLToPath(new URL("../..", import.meta.url)), "prompts", "solve-issue.md")
+const SANDBOX_IMAGE = "baywatch-agent"
+const PROMPT_PATH = path.join(BAYWATCH_ROOT, "prompts", "solve-issue.md")
 
 function slugify(s: string): string {
     return s
