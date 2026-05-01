@@ -5,11 +5,13 @@ import { podman } from "@ai-hero/sandcastle/sandboxes/podman"
 
 import { createAgentClone, pushBranchToMain } from "../agentClone.ts"
 import { loadAgentEnv } from "../agentEnv.ts"
-import { writeAgentSettings } from "../agentSettings.ts"
 import { BAYWATCH_ROOT, type BaywatchConfig } from "../config.ts"
 import type { DiscoveredIssue } from "../discovery.ts"
 import { prepRepo } from "../prep.ts"
 import { completeRun, startRun } from "../state.ts"
+
+const SETTINGS_HOST_PATH = path.join(BAYWATCH_ROOT, ".claude", "settings.json")
+const SETTINGS_SANDBOX_PATH = "/home/agent/.claude/settings.json"
 
 const SANDBOX_IMAGE = "baywatch-agent"
 const PROMPT_PATH = path.join(BAYWATCH_ROOT, "prompts", "solve-issue.md")
@@ -60,8 +62,6 @@ export async function solveIssue(opts: {
     })
     console.log(`[dev]   agent clone ready at ${clone.path}`)
 
-    writeAgentSettings({ targetDir: clone.path, config, asLocalOverride: false })
-
     const hooks = prep.installCmd ? { sandbox: { onSandboxReady: [{ command: prep.installCmd }] } } : undefined
 
     const runId = startRun({
@@ -75,7 +75,12 @@ export async function solveIssue(opts: {
     try {
         const result = await run({
             agent: claudeCode(config.agent.model),
-            sandbox: podman({ imageName: SANDBOX_IMAGE, selinuxLabel: false, env: loadAgentEnv() }),
+            sandbox: podman({
+                imageName: SANDBOX_IMAGE,
+                selinuxLabel: false,
+                env: loadAgentEnv(),
+                mounts: [{ hostPath: SETTINGS_HOST_PATH, sandboxPath: SETTINGS_SANDBOX_PATH, readonly: true }],
+            }),
             cwd: clone.path,
             promptFile: PROMPT_PATH,
             promptArgs: {

@@ -5,7 +5,6 @@ import { podman } from "@ai-hero/sandcastle/sandboxes/podman"
 import { $ } from "bun"
 
 import { loadAgentEnv } from "../agentEnv.ts"
-import { removeAgentSettings, writeAgentSettings } from "../agentSettings.ts"
 import { BAYWATCH_ROOT, type BaywatchConfig } from "../config.ts"
 import type { DiscoveredPR } from "../discovery.ts"
 import { completeRun, recordReview, startRun } from "../state.ts"
@@ -14,6 +13,8 @@ const SANDBOX_IMAGE = "baywatch-agent"
 const PROMPT_PATH = path.join(BAYWATCH_ROOT, "prompts", "review-pr.md")
 const REVIEWS_HOST_DIR = path.join(BAYWATCH_ROOT, "reviews")
 const REVIEWS_SANDBOX_DIR = "/baywatch-reviews"
+const SETTINGS_HOST_PATH = path.join(BAYWATCH_ROOT, ".claude", "settings.json")
+const SETTINGS_SANDBOX_PATH = "/home/agent/.claude/settings.json"
 
 export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig; dryRun: boolean }): Promise<void> {
     const { pr, config, dryRun } = opts
@@ -57,8 +58,6 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
         reviewPath: reviewHostPath,
     })
 
-    const settingsPath = writeAgentSettings({ targetDir: pr.repoPath, config, asLocalOverride: true })
-
     try {
         const result = await run({
             agent: claudeCode(config.agent.model),
@@ -66,7 +65,10 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
                 imageName: SANDBOX_IMAGE,
                 selinuxLabel: false,
                 env: loadAgentEnv(),
-                mounts: [{ hostPath: REVIEWS_HOST_DIR, sandboxPath: REVIEWS_SANDBOX_DIR }],
+                mounts: [
+                    { hostPath: REVIEWS_HOST_DIR, sandboxPath: REVIEWS_SANDBOX_DIR },
+                    { hostPath: SETTINGS_HOST_PATH, sandboxPath: SETTINGS_SANDBOX_PATH, readonly: true },
+                ],
             }),
             cwd: pr.repoPath,
             promptFile: PROMPT_PATH,
@@ -110,7 +112,5 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
     } catch (err) {
         completeRun(runId, { status: "failed" })
         throw err
-    } finally {
-        removeAgentSettings(settingsPath)
     }
 }

@@ -29,6 +29,11 @@ RUN usermod -d /home/agent -m -l agent node
 USER agent
 WORKDIR /home/agent
 
+# Make ~/.claude/ exist so baywatch can bind-mount settings.json into it at runtime.
+# Sessions claude-code writes (~/.claude/projects/...) stay in the container's writable
+# filesystem alongside the read-only settings.json mount.
+RUN mkdir -p /home/agent/.claude
+
 # Claude Code CLI (the agent the run uses)
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
