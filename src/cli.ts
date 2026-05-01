@@ -11,15 +11,18 @@ USAGE
   baywatch <command> [options]
 
 COMMANDS
-  list issues [REF ...]                             Issues assigned (+ ad-hoc refs)
-  list prs [REF ...]                                PRs assigned + review-requested (+ ad-hoc refs)
-  dev [--dry-run] [--limit N] [REF ...]             Run the dev agent (+ ad-hoc issue refs) (stub)
-  review [--dry-run] [--limit N] [REF ...]          Run the review agent (+ ad-hoc PR refs) (stub)
-  install-specs                                     Build & install Fig autocomplete spec
-  -h, --help                                        Show this help
+  list issues [REF ...]                                       Issues assigned (+ ad-hoc refs)
+  list prs [REF ...]                                          PRs assigned + review-requested (+ ad-hoc refs)
+  dev [--dry-run] [--only] [--limit N] [REF ...]              Run the dev agent
+  review [--dry-run] [--only] [--limit N] [REF ...]           Run the review agent
+  install-specs                                               Build & install Fig autocomplete spec
+  -h, --help                                                  Show this help
 
 REF
-  owner/repo#123      Add this issue/PR to the run on top of auto-discovery
+  owner/repo#123      Add this issue/PR to the run on top of auto-discovery (or use --only to skip auto)
+
+FLAGS
+  --only              Run only the explicit REFs; skip auto-discovery
 `
 
 const REF_RE = /^[^/]+\/[^#]+#\d+$/
@@ -30,14 +33,16 @@ const printHelpAndExit = (): never => {
     process.exit(0)
 }
 
-type RunOpts = { dryRun: boolean; limit: number; refs: string[] }
+type RunOpts = { dryRun: boolean; limit: number; refs: string[]; only: boolean }
 
 const parseRunOpts = (argv: string[]): RunOpts => {
-    const out: RunOpts = { dryRun: false, limit: 1, refs: [] }
+    const out: RunOpts = { dryRun: false, limit: 1, refs: [], only: false }
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i]
         if (a === "--dry-run") {
             out.dryRun = true
+        } else if (a === "--only") {
+            out.only = true
         } else if (a === "--limit") {
             const v = argv[i + 1]
             if (v === undefined) throw new Error("--limit requires a value")
@@ -102,14 +107,24 @@ const listPRs = async (refs: string[]): Promise<void> => {
 }
 
 const runDev = async (opts: RunOpts): Promise<void> => {
+    if (opts.only && opts.refs.length === 0) throw new Error("--only requires at least one REF")
     const cfg = await loadConfig()
-    const issues = (await discoverIssues(cfg, opts.refs)).slice(0, opts.limit)
+    const all = await discoverIssues(cfg, opts.refs)
+    const filtered = opts.only
+        ? all.filter((i) => opts.refs.includes(`${i.repository.nameWithOwner}#${i.number}`))
+        : all
+    const issues = filtered.slice(0, opts.limit)
     for (const issue of issues) await solveIssue({ issue, config: cfg, dryRun: opts.dryRun })
 }
 
 const runReview = async (opts: RunOpts): Promise<void> => {
+    if (opts.only && opts.refs.length === 0) throw new Error("--only requires at least one REF")
     const cfg = await loadConfig()
-    const prs = (await discoverPRs(cfg, opts.refs)).slice(0, opts.limit)
+    const all = await discoverPRs(cfg, opts.refs)
+    const filtered = opts.only
+        ? all.filter((pr) => opts.refs.includes(`${pr.repository.nameWithOwner}#${pr.number}`))
+        : all
+    const prs = filtered.slice(0, opts.limit)
     for (const pr of prs) await reviewPR({ pr, config: cfg, dryRun: opts.dryRun })
 }
 

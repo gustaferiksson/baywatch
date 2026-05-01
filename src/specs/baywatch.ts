@@ -5,6 +5,11 @@ const dryRunOption: Fig.Option = {
     description: "Show what would happen without prepping or running",
 }
 
+const onlyOption: Fig.Option = {
+    name: "--only",
+    description: "Run only the explicit REFs; skip auto-discovery",
+}
+
 const limitOption: Fig.Option = {
     name: "--limit",
     description: "Max items to process",
@@ -34,13 +39,13 @@ const completionSpec: Fig.Spec = {
         {
             name: "dev",
             description: "Run the dev agent against discovered issues (+ ad-hoc refs) (currently a stub)",
-            options: [dryRunOption, limitOption],
+            options: [dryRunOption, onlyOption, limitOption],
             args: { name: "ref", description: "owner/repo#num", isOptional: true, isVariadic: true },
         },
         {
             name: "review",
             description: "Run the review agent against discovered PRs (+ ad-hoc refs) (currently a stub)",
-            options: [dryRunOption, limitOption],
+            options: [dryRunOption, onlyOption, limitOption],
             args: { name: "ref", description: "owner/repo#num", isOptional: true, isVariadic: true },
         },
         {
