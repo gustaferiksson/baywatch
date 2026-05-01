@@ -80,7 +80,6 @@
       "Bash(gh api:* --method patch*)",
       "Bash(gh api:* --method delete*)",
 
-      "Bash(git push:*)",
       "Bash(git remote add:*)",
       "Bash(git remote remove:*)",
       "Bash(git remote rm:*)",
