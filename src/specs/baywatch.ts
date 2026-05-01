@@ -38,13 +38,13 @@ const completionSpec: Fig.Spec = {
         },
         {
             name: "dev",
-            description: "Run the dev agent against discovered issues (+ ad-hoc refs) (currently a stub)",
+            description: "Run the dev agent against discovered issues (+ ad-hoc refs)",
             options: [dryRunOption, onlyOption, limitOption],
             args: { name: "ref", description: "owner/repo#num", isOptional: true, isVariadic: true },
         },
         {
             name: "review",
-            description: "Run the review agent against discovered PRs (+ ad-hoc refs) (currently a stub)",
+            description: "Run the review agent against discovered PRs (+ ad-hoc refs)",
             options: [dryRunOption, onlyOption, limitOption],
             args: { name: "ref", description: "owner/repo#num", isOptional: true, isVariadic: true },
         },
