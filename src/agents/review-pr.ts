@@ -7,6 +7,7 @@ import { $ } from "bun"
 import { loadAgentEnv } from "../agentEnv.ts"
 import { BAYWATCH_ROOT, type BaywatchConfig } from "../config.ts"
 import type { DiscoveredPR } from "../discovery.ts"
+import { readNote } from "../notes.ts"
 import { completeRun, recordReview, startRun } from "../state.ts"
 
 const SANDBOX_IMAGE = "baywatch-agent"
@@ -84,6 +85,7 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
                 PR_DIFF: diff,
                 REVIEW_OUTPUT_PATH: reviewSandboxPath,
                 SUBMIT_SCRIPT_PATH: submitSandboxPath,
+                ADDITIONAL_NOTES: readNote(`${ownerRepo}#${pr.number}`) ?? "(none — review from the diff alone)",
             },
             branchStrategy: { type: "head" },
             name: `review-${pr.number}`,

@@ -9,6 +9,12 @@
 
 {{PR_BODY}}
 
+## Additional notes from the maintainer
+
+These are free-form notes the maintainer left for this review. Treat them as **higher priority than the PR body** — they're more recent and more specific. They may flag things they want you to scrutinize, things to skip, or context that didn't make it into the PR description.
+
+{{ADDITIONAL_NOTES}}
+
 ## Diff
 
 ```diff

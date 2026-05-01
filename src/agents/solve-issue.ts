@@ -7,6 +7,7 @@ import { createAgentClone, pushBranchToMain } from "../agentClone.ts"
 import { loadAgentEnv } from "../agentEnv.ts"
 import { BAYWATCH_ROOT, type BaywatchConfig } from "../config.ts"
 import type { DiscoveredIssue } from "../discovery.ts"
+import { readNote } from "../notes.ts"
 import { prepRepo } from "../prep.ts"
 import { completeRun, startRun } from "../state.ts"
 
@@ -91,6 +92,8 @@ export async function solveIssue(opts: {
                 ISSUE_URL: issue.url,
                 BRANCH_NAME: branchName,
                 DEFAULT_BRANCH: prep.defaultBranch,
+                ADDITIONAL_NOTES:
+                    readNote(`${ownerRepo}#${issue.number}`) ?? "(none — proceed from the issue body alone)",
             },
             branchStrategy: { type: "head" },
             ...(hooks ? { hooks } : {}),

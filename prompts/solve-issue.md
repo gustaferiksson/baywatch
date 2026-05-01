@@ -8,6 +8,12 @@
 
 {{ISSUE_BODY}}
 
+## Additional notes from the maintainer
+
+These are free-form notes the maintainer left for this run. Treat them as **higher priority than the issue body** — they're more recent and more specific.
+
+{{ADDITIONAL_NOTES}}
+
 ## Hard rules (do not relax)
 
 - **Never** `git push`. Never `gh pr create`. Never run any GitHub write command.

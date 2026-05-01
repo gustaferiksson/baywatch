@@ -163,6 +163,16 @@ const completionSpec: Fig.Spec = {
             description: "Rebuild the baywatch-agent podman image from baywatch's Containerfile",
         },
         {
+            name: "notes",
+            description: "Free-form notes injected into the agent prompt for a REF",
+            args: { name: "ref", description: "owner/repo#num", isOptional: false },
+            options: [
+                { name: "--path", description: "Print the file path (default; pipe to your editor)" },
+                { name: "--print", description: "Print the current note contents to stdout" },
+                { name: "--write", description: "Write stdin to the note file (overwrites)" },
+            ],
+        },
+        {
             name: "clean",
             description: "Cleanup commands for baywatch's local state",
             subcommands: [

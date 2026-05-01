@@ -6,6 +6,7 @@ import { BAYWATCH_ROOT, loadConfig } from "./config.ts"
 import { discoverIssues, discoverPRs } from "./discovery.ts"
 import { installSpecs } from "./install-specs.ts"
 import { formatAge, formatDuration, listRecentLogs } from "./logs.ts"
+import { noteFilePath, readNote, writeNote } from "./notes.ts"
 import { pickIssues, pickPRs } from "./picker.ts"
 
 const HELP = `baywatch — personal agent orchestrator
@@ -21,6 +22,7 @@ COMMANDS
   logs [<id>] [--follow] [--running] [--json] [--limit N]     Recent agent run logs (id picks one; --follow tails; --json for tooling)
   image-build                                                 Rebuild the baywatch-agent podman image
   clean clones [--older-than 14d] [--dry-run]                 Remove ~/.baywatch/clones/ entries older than threshold (skips in-flight)
+  notes <REF> [--print | --path | --write]                    Free-form notes injected into the agent prompt for this REF
   install-specs                                               Build & install Fig autocomplete spec
   -h, --help                                                  Show this help
 
@@ -247,6 +249,43 @@ const runClean = (argv: string[]): void => {
     console.log(`\n✓ Removed ${removable.length} clone(s), reclaimed ${formatSize(totalBytes)}.`)
 }
 
+const runNotes = async (argv: string[]): Promise<void> => {
+    const first = argv[0]
+    if (first === undefined || first === "-h" || first === "--help") {
+        printHelpAndExit()
+        return
+    }
+    const ref = first
+    if (!isRef(ref)) throw new Error(`bad ref: ${ref} (expected owner/repo#num)`)
+
+    const flag = argv[1] ?? "--path"
+
+    if (flag === "--path") {
+        process.stdout.write(`${noteFilePath(ref)}\n`)
+        return
+    }
+
+    if (flag === "--print") {
+        const note = readNote(ref)
+        if (note === null) {
+            console.log(`(no notes for ${ref})`)
+            return
+        }
+        process.stdout.write(`${note}\n`)
+        return
+    }
+
+    if (flag === "--write") {
+        // Read from stdin so callers can pipe content in: `cat note.md | baywatch notes <ref> --write`
+        const content = await Bun.stdin.text()
+        const p = writeNote(ref, content)
+        console.log(`✓ wrote ${p}`)
+        return
+    }
+
+    throw new Error(`unknown 'notes' flag: ${flag} — expected --path, --print, or --write`)
+}
+
 const runImageBuild = async (): Promise<void> => {
     const containerfile = `${BAYWATCH_ROOT}/Containerfile`
     console.log(`Building baywatch-agent from ${containerfile}`)
@@ -374,6 +413,9 @@ try {
             break
         case "clean":
             runClean(argv.slice(1))
+            break
+        case "notes":
+            await runNotes(argv.slice(1))
             break
         case "install-specs":
             await installSpecs()

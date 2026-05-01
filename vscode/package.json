@@ -4,7 +4,12 @@
     "description": "VS Code surface for the baywatch agent orchestrator. Talks to the `baywatch` CLI; CLI is the source of truth.",
     "version": "0.0.1",
     "publisher": "gustaferiksson",
-    "private": true,
+    "private": false,
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/gustaferiksson/baywatch"
+    },
     "engines": {
         "vscode": "^1.95.0"
     },
@@ -12,11 +17,14 @@
     "categories": [
         "Other"
     ],
+    "keywords": [
+        "claude",
+        "agent",
+        "automation",
+        "github"
+    ],
     "activationEvents": [
-        "onView:baywatch.runs",
-        "onCommand:baywatch.runDev",
-        "onCommand:baywatch.runReview",
-        "onCommand:baywatch.refreshRuns"
+        "onStartupFinished"
     ],
     "contributes": {
         "viewsContainers": {
@@ -33,6 +41,10 @@
                 {
                     "id": "baywatch.runs",
                     "name": "Runs"
+                },
+                {
+                    "id": "baywatch.reviews",
+                    "name": "Reviews"
                 }
             ]
         },
@@ -49,16 +61,55 @@
             },
             {
                 "command": "baywatch.refreshRuns",
-                "title": "Baywatch: Refresh runs",
+                "title": "Baywatch: Refresh",
                 "icon": "$(refresh)"
             },
             {
+                "command": "baywatch.tailLog",
+                "title": "Baywatch: Tail log",
+                "icon": "$(output)"
+            },
+            {
                 "command": "baywatch.openLog",
-                "title": "Baywatch: Open run log"
+                "title": "Baywatch: Open log file"
             },
             {
                 "command": "baywatch.openClone",
-                "title": "Baywatch: Open agent clone in new window"
+                "title": "Baywatch: Open agent clone in new window",
+                "icon": "$(window)"
+            },
+            {
+                "command": "baywatch.editNotesForIssue",
+                "title": "Baywatch: Edit notes for issue…",
+                "icon": "$(edit)"
+            },
+            {
+                "command": "baywatch.editNotesForPR",
+                "title": "Baywatch: Edit notes for PR…",
+                "icon": "$(edit)"
+            },
+            {
+                "command": "baywatch.startClaudeSession",
+                "title": "Baywatch: Start Claude session here",
+                "icon": "$(zap)"
+            },
+            {
+                "command": "baywatch.pushBranch",
+                "title": "Baywatch: Push agent branch",
+                "icon": "$(cloud-upload)"
+            },
+            {
+                "command": "baywatch.openPR",
+                "title": "Baywatch: Open PR for agent branch",
+                "icon": "$(git-pull-request)"
+            },
+            {
+                "command": "baywatch.imageBuild",
+                "title": "Baywatch: Rebuild sandbox image"
+            },
+            {
+                "command": "baywatch.cleanClones",
+                "title": "Baywatch: Clean old agent clones"
             }
         ],
         "menus": {
@@ -74,24 +125,88 @@
                     "group": "navigation@2"
                 },
                 {
-                    "command": "baywatch.refreshRuns",
+                    "command": "baywatch.startClaudeSession",
                     "when": "view == baywatch.runs",
                     "group": "navigation@3"
+                },
+                {
+                    "command": "baywatch.refreshRuns",
+                    "when": "view == baywatch.runs || view == baywatch.reviews",
+                    "group": "navigation@99"
                 }
             ],
             "view/item/context": [
                 {
+                    "command": "baywatch.tailLog",
+                    "when": "view == baywatch.runs",
+                    "group": "inline@1"
+                },
+                {
                     "command": "baywatch.openClone",
                     "when": "view == baywatch.runs && viewItem == dev-run",
-                    "group": "inline"
+                    "group": "inline@2"
+                },
+                {
+                    "command": "baywatch.pushBranch",
+                    "when": "view == baywatch.runs && viewItem == dev-run",
+                    "group": "inline@3"
+                },
+                {
+                    "command": "baywatch.openPR",
+                    "when": "view == baywatch.runs && viewItem == dev-run",
+                    "group": "inline@4"
+                },
+                {
+                    "command": "baywatch.openLog",
+                    "when": "view == baywatch.runs",
+                    "group": "1_view"
+                },
+                {
+                    "command": "baywatch.openClone",
+                    "when": "view == baywatch.runs && viewItem == dev-run",
+                    "group": "1_view"
+                },
+                {
+                    "command": "baywatch.pushBranch",
+                    "when": "view == baywatch.runs && viewItem == dev-run",
+                    "group": "2_action"
+                },
+                {
+                    "command": "baywatch.openPR",
+                    "when": "view == baywatch.runs && viewItem == dev-run",
+                    "group": "2_action"
+                }
+            ],
+            "commandPalette": [
+                {
+                    "command": "baywatch.tailLog",
+                    "when": "false"
+                },
+                {
+                    "command": "baywatch.openLog",
+                    "when": "false"
+                },
+                {
+                    "command": "baywatch.openClone",
+                    "when": "false"
+                },
+                {
+                    "command": "baywatch.pushBranch",
+                    "when": "false"
+                },
+                {
+                    "command": "baywatch.openPR",
+                    "when": "false"
                 }
             ]
         }
     },
     "scripts": {
+        "vscode:prepublish": "npm run build",
         "build": "tsc -p .",
         "watch": "tsc -p . --watch",
-        "package": "vsce package --no-yarn"
+        "package": "vsce package --no-yarn",
+        "publish": "vsce publish --no-yarn"
     },
     "devDependencies": {
         "@types/node": "22.10.5",

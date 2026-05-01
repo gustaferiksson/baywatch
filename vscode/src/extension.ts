@@ -1,110 +1,130 @@
-// VS Code surface for baywatch.
+// Baywatch — VS Code extension entry point.
 //
-// The extension is intentionally a thin shell around the `baywatch` CLI:
-// it shells out for data (via `baywatch logs --json`, `baywatch list ... --json`)
-// and dispatches actions (via `baywatch dev --only`, `baywatch review --only`).
-// This keeps the CLI the single source of truth — anything the extension can
-// do, you can also do from a terminal.
+// The extension is a thin shell over the `baywatch` CLI. Anything it does, you can also do
+// from a terminal — see vscode/src/cli.ts for the CLI calls and the README for the design.
 
-import { execFile } from "node:child_process"
-import { promisify } from "node:util"
 import * as vscode from "vscode"
 
-const execFileAsync = promisify(execFile)
+import { getRun, listIssueRefs, listPrRefs } from "./cli.js"
+import { tailRun } from "./log-channel.js"
+import { openNotesPanel } from "./notes-panel.js"
+import { ReviewsTreeDataProvider } from "./reviews-tree.js"
+import { RunsTreeDataProvider } from "./runs-tree.js"
+import { updateStatusBar } from "./status-bar.js"
+import type { RunEntry } from "./types.js"
 
-type RunEntry = {
-    runId: number
-    kind: "dev" | "review"
-    status: "running" | "success" | "failed" | "cancelled"
-    target: string
-    ownerRepo: string
-    branch: string | null
-    startedAt: string
-    finishedAt: string | null
-    logPath: string | null
-}
+export function activate(context: vscode.ExtensionContext): void {
+    const runsProvider = new RunsTreeDataProvider()
+    const reviewsProvider = new ReviewsTreeDataProvider()
 
-class RunsTreeDataProvider implements vscode.TreeDataProvider<RunEntry> {
-    private readonly _onDidChangeTreeData = new vscode.EventEmitter<RunEntry | undefined>()
-    readonly onDidChangeTreeData = this._onDidChangeTreeData.event
+    context.subscriptions.push(
+        vscode.window.registerTreeDataProvider("baywatch.runs", runsProvider),
+        vscode.window.registerTreeDataProvider("baywatch.reviews", reviewsProvider)
+    )
 
-    refresh(): void {
-        this._onDidChangeTreeData.fire(undefined)
+    const refreshAll = (): void => {
+        runsProvider.refresh()
+        reviewsProvider.refresh()
+        void updateStatusBar(context)
     }
 
-    getTreeItem(run: RunEntry): vscode.TreeItem {
-        const item = new vscode.TreeItem(`#${run.runId} ${run.ownerRepo} ${run.target}`)
-        item.description = `${run.kind}  ${run.status}`
-        item.tooltip = run.logPath
-            ? new vscode.MarkdownString(
-                  `**${run.ownerRepo} ${run.target}**\n\nbranch: \`${run.branch ?? "(none)"}\`\n\nlog: \`${run.logPath}\``
-              )
-            : undefined
-        item.iconPath = iconForRun(run)
-        item.contextValue = run.kind === "dev" ? "dev-run" : "review-run"
-        if (run.logPath) {
-            item.command = {
-                command: "baywatch.openLog",
-                title: "Open log",
-                arguments: [run],
+    context.subscriptions.push(
+        vscode.commands.registerCommand("baywatch.refreshRuns", refreshAll),
+        vscode.commands.registerCommand("baywatch.runDev", () => runDevCommand(refreshAll)),
+        vscode.commands.registerCommand("baywatch.runReview", () => runReviewCommand(refreshAll)),
+        vscode.commands.registerCommand("baywatch.tailLog", (run?: RunEntry) => {
+            if (run) tailRun(run)
+        }),
+        vscode.commands.registerCommand("baywatch.openLog", async (run?: RunEntry) => {
+            if (!run?.logPath) {
+                void vscode.window.showInformationMessage("No log file recorded for this run yet.")
+                return
             }
-        }
-        return item
-    }
-
-    async getChildren(): Promise<RunEntry[]> {
-        try {
-            const { stdout } = await execFileAsync("baywatch", ["logs", "--json", "--limit", "50"], {
-                maxBuffer: 4 * 1024 * 1024,
+            const doc = await vscode.workspace.openTextDocument(run.logPath)
+            await vscode.window.showTextDocument(doc)
+        }),
+        vscode.commands.registerCommand("baywatch.openClone", async (run?: RunEntry) => {
+            if (!run) return
+            const detail = await getRun(run.runId)
+            if (!detail?.agentClonePath) {
+                void vscode.window.showInformationMessage("This run has no agent clone path.")
+                return
+            }
+            await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(detail.agentClonePath), {
+                forceNewWindow: true,
             })
-            return JSON.parse(stdout) as RunEntry[]
-        } catch (err) {
-            void vscode.window.showErrorMessage(`baywatch logs failed: ${(err as Error).message}`)
-            return []
-        }
-    }
+        }),
+        vscode.commands.registerCommand("baywatch.editNotesForIssue", () => editNotesCommand("issues", context)),
+        vscode.commands.registerCommand("baywatch.editNotesForPR", () => editNotesCommand("prs", context)),
+        vscode.commands.registerCommand("baywatch.startClaudeSession", () => startClaudeSessionCommand()),
+        vscode.commands.registerCommand("baywatch.pushBranch", (run?: RunEntry) => pushBranchCommand(run)),
+        vscode.commands.registerCommand("baywatch.openPR", (run?: RunEntry) => openPRCommand(run)),
+        vscode.commands.registerCommand("baywatch.imageBuild", () => {
+            const term = vscode.window.createTerminal({ name: "baywatch image-build" })
+            term.show(true)
+            term.sendText("baywatch image-build")
+        }),
+        vscode.commands.registerCommand("baywatch.cleanClones", () => {
+            const term = vscode.window.createTerminal({ name: "baywatch clean clones" })
+            term.show(true)
+            term.sendText("baywatch clean clones --dry-run")
+        })
+    )
+
+    // Initial draw + auto-refresh every 10s.
+    refreshAll()
+    const interval = setInterval(refreshAll, 10_000)
+    context.subscriptions.push({ dispose: () => clearInterval(interval) })
 }
 
-function iconForRun(run: RunEntry): vscode.ThemeIcon {
-    if (run.status === "running") return new vscode.ThemeIcon("loading~spin", new vscode.ThemeColor("charts.blue"))
-    if (run.status === "success") return new vscode.ThemeIcon("check", new vscode.ThemeColor("charts.green"))
-    if (run.status === "failed") return new vscode.ThemeIcon("error", new vscode.ThemeColor("charts.red"))
-    return new vscode.ThemeIcon("circle-slash")
+export function deactivate(): void {}
+
+// ---------- command bodies ----------
+
+function runInTerminal(name: string, command: string): void {
+    const term = vscode.window.createTerminal({ name })
+    term.show(true)
+    term.sendText(command)
 }
 
-async function pickRefViaList(kind: "issues" | "prs"): Promise<string | undefined> {
-    let stdout: string
-    try {
-        const r = await execFileAsync("baywatch", ["list", kind, "--json"], { maxBuffer: 4 * 1024 * 1024 })
-        stdout = r.stdout
-    } catch (err) {
-        void vscode.window.showErrorMessage(`baywatch list ${kind} failed: ${(err as Error).message}`)
-        return undefined
-    }
-    const items = JSON.parse(stdout) as Array<{
-        ref: string
-        title: string
-        hasClone: boolean
-        blockedByPRs?: number[]
-        reasonForReview?: string
-        alreadyReviewedAtThisHead?: boolean
-    }>
+async function pickIssueRef(): Promise<string | undefined> {
+    const items = await listIssueRefs()
     if (items.length === 0) {
-        void vscode.window.showInformationMessage(`No ${kind} discovered.`)
+        void vscode.window.showInformationMessage("No issues discovered.")
         return undefined
     }
     const picks: vscode.QuickPickItem[] = items.map((i) => ({
         label: i.ref,
         description: i.title,
-        detail: detailFor(i),
+        detail: refDetail({
+            hasClone: i.hasClone,
+            blockedByPRs: i.blockedByPRs,
+        }),
     }))
-    const chosen = await vscode.window.showQuickPick(picks, {
-        placeHolder: `Select a ${kind === "issues" ? "issue" : "PR"} ref`,
-    })
+    const chosen = await vscode.window.showQuickPick(picks, { placeHolder: "Pick an issue" })
     return chosen?.label
 }
 
-function detailFor(i: {
+async function pickPrRef(): Promise<string | undefined> {
+    const items = await listPrRefs()
+    if (items.length === 0) {
+        void vscode.window.showInformationMessage("No PRs discovered.")
+        return undefined
+    }
+    const picks: vscode.QuickPickItem[] = items.map((p) => ({
+        label: p.ref,
+        description: p.title,
+        detail: refDetail({
+            hasClone: p.hasClone,
+            reasonForReview: p.reasonForReview,
+            alreadyReviewedAtThisHead: p.alreadyReviewedAtThisHead,
+        }),
+    }))
+    const chosen = await vscode.window.showQuickPick(picks, { placeHolder: "Pick a PR" })
+    return chosen?.label
+}
+
+function refDetail(i: {
     hasClone: boolean
     blockedByPRs?: number[]
     reasonForReview?: string
@@ -118,63 +138,93 @@ function detailFor(i: {
     return parts.join("  ·  ")
 }
 
-function runInTerminal(name: string, command: string): void {
-    const term = vscode.window.createTerminal({ name })
-    term.show(true)
-    term.sendText(command)
+async function runDevCommand(refresh: () => void): Promise<void> {
+    const ref = await pickIssueRef()
+    if (!ref) return
+    runInTerminal(`baywatch dev ${ref}`, `baywatch dev --only ${ref}`)
+    setTimeout(refresh, 750)
 }
 
-export function activate(context: vscode.ExtensionContext): void {
-    const provider = new RunsTreeDataProvider()
-    context.subscriptions.push(vscode.window.registerTreeDataProvider("baywatch.runs", provider))
+async function runReviewCommand(refresh: () => void): Promise<void> {
+    const ref = await pickPrRef()
+    if (!ref) return
+    runInTerminal(`baywatch review ${ref}`, `baywatch review --only ${ref}`)
+    setTimeout(refresh, 750)
+}
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand("baywatch.refreshRuns", () => provider.refresh()),
+async function editNotesCommand(kind: "issues" | "prs", context: vscode.ExtensionContext): Promise<void> {
+    const ref = kind === "issues" ? await pickIssueRef() : await pickPrRef()
+    if (!ref) return
+    await openNotesPanel(ref, context)
+}
 
-        vscode.commands.registerCommand("baywatch.runDev", async () => {
-            const ref = await pickRefViaList("issues")
-            if (!ref) return
-            runInTerminal(`baywatch dev ${ref}`, `baywatch dev --only ${ref}`)
-            setTimeout(() => provider.refresh(), 500)
-        }),
+async function startClaudeSessionCommand(): Promise<void> {
+    // Default to the active workspace folder; let the maintainer browse if they want elsewhere.
+    const folders = vscode.workspace.workspaceFolders ?? []
+    const picks: Array<vscode.QuickPickItem & { fsPath?: string }> = folders.map((f) => ({
+        label: `$(folder) ${f.name}`,
+        description: f.uri.fsPath,
+        fsPath: f.uri.fsPath,
+    }))
+    picks.push({ label: "$(folder-opened) Browse…", description: "Pick a directory" })
 
-        vscode.commands.registerCommand("baywatch.runReview", async () => {
-            const ref = await pickRefViaList("prs")
-            if (!ref) return
-            runInTerminal(`baywatch review ${ref}`, `baywatch review --only ${ref}`)
-            setTimeout(() => provider.refresh(), 500)
-        }),
+    const chosen = await vscode.window.showQuickPick(picks, { placeHolder: "Start a Claude Code session in…" })
+    if (!chosen) return
 
-        vscode.commands.registerCommand("baywatch.openLog", async (run?: RunEntry) => {
-            if (!run?.logPath) {
-                void vscode.window.showInformationMessage("No log file recorded for this run yet.")
-                return
-            }
-            const doc = await vscode.workspace.openTextDocument(run.logPath)
-            await vscode.window.showTextDocument(doc)
-        }),
-
-        vscode.commands.registerCommand("baywatch.openClone", async (run?: RunEntry) => {
-            if (!run) return
-            try {
-                const { stdout } = await execFileAsync("baywatch", ["logs", String(run.runId), "--json"])
-                const detail = JSON.parse(stdout) as { agentClonePath?: string }
-                if (!detail.agentClonePath) {
-                    void vscode.window.showInformationMessage("This run has no agent clone path.")
-                    return
-                }
-                await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(detail.agentClonePath), {
-                    forceNewWindow: true,
-                })
-            } catch (err) {
-                void vscode.window.showErrorMessage(`baywatch logs ${run.runId} failed: ${(err as Error).message}`)
-            }
+    let target: string
+    if (chosen.fsPath) {
+        target = chosen.fsPath
+    } else {
+        const browsed = await vscode.window.showOpenDialog({
+            canSelectFiles: false,
+            canSelectFolders: true,
+            canSelectMany: false,
+            openLabel: "Start session here",
         })
-    )
+        if (!browsed || browsed.length === 0) return
+        target = browsed[0]?.fsPath ?? ""
+        if (!target) return
+    }
 
-    // Refresh every 10s so the tree shows in-flight runs flipping to success/failed without manual refresh.
-    const interval = setInterval(() => provider.refresh(), 10_000)
-    context.subscriptions.push({ dispose: () => clearInterval(interval) })
+    const sessionName = await vscode.window.showInputBox({
+        prompt: "Session name (shows up at claude.ai/code)",
+        value: `baywatch-${new Date().toISOString().slice(0, 10)}`,
+    })
+    if (!sessionName) return
+
+    const term = vscode.window.createTerminal({ name: `claude · ${sessionName}`, cwd: target })
+    term.show(true)
+    term.sendText(`claude --remote-control "${sessionName.replace(/"/g, '\\"')}"`)
 }
 
-export function deactivate(): void {}
+async function pushBranchCommand(run?: RunEntry): Promise<void> {
+    if (!run || run.kind !== "dev") {
+        void vscode.window.showInformationMessage("Right-click a dev run to push its branch.")
+        return
+    }
+    const detail = await getRun(run.runId)
+    if (!detail?.agentClonePath || !detail.branch) {
+        void vscode.window.showInformationMessage("This run has no agent clone or branch recorded.")
+        return
+    }
+    runInTerminal(
+        `baywatch push #${run.runId}`,
+        `cd "${detail.agentClonePath}" && git push -u origin "${detail.branch}"`
+    )
+}
+
+async function openPRCommand(run?: RunEntry): Promise<void> {
+    if (!run || run.kind !== "dev") {
+        void vscode.window.showInformationMessage("Right-click a dev run to open a PR for its branch.")
+        return
+    }
+    const detail = await getRun(run.runId)
+    if (!detail?.agentClonePath || !detail.branch) {
+        void vscode.window.showInformationMessage("This run has no agent clone or branch recorded.")
+        return
+    }
+    runInTerminal(
+        `baywatch gh pr create #${run.runId}`,
+        `cd "${detail.agentClonePath}" && gh pr create --repo ${run.ownerRepo} --head ${detail.branch} --fill --web`
+    )
+}
