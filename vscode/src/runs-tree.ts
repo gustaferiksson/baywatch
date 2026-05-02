@@ -32,9 +32,11 @@ export class RunsTreeDataProvider implements vscode.TreeDataProvider<RunEntry> {
         item.iconPath = new vscode.ThemeIcon(statusIcon(run.status), statusColor(run.status))
         item.contextValue = run.kind === "dev" ? "dev-run" : "review-run"
         if (run.logPath) {
+            // Click opens the log as a regular editor tab. Use the inline tail button
+            // (right-side) for live streaming into the output channel.
             item.command = {
-                command: "baywatch.tailLog",
-                title: "Tail log",
+                command: "baywatch.openLog",
+                title: "Open log",
                 arguments: [run],
             }
         }

@@ -2,7 +2,7 @@
     "name": "baywatch-vscode",
     "displayName": "Baywatch",
     "description": "VS Code surface for the baywatch agent orchestrator. Talks to the `baywatch` CLI; CLI is the source of truth.",
-    "version": "0.0.8",
+    "version": "0.0.9",
     "publisher": "gustaferiksson",
     "private": false,
     "license": "MIT",
@@ -74,7 +74,7 @@
             },
             {
                 "command": "baywatch.tailLog",
-                "title": "Baywatch: Tail log",
+                "title": "Baywatch: Tail log (live, output channel)",
                 "icon": "$(output)"
             },
             {
@@ -227,6 +227,11 @@
                     "command": "baywatch.tailLog",
                     "when": "view == baywatch.runs",
                     "group": "inline@1"
+                },
+                {
+                    "command": "baywatch.tailLog",
+                    "when": "view == baywatch.runs",
+                    "group": "1_view"
                 },
                 {
                     "command": "baywatch.openClone",

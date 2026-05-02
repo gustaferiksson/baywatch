@@ -16,7 +16,7 @@ import { updateStatusBar } from "./status-bar.js"
 import type { IssueRef, PrRef, RunEntry } from "./types.js"
 
 // Bumped on every meaningful change so F5/reinstall is verifiable from the activate toast.
-const VERSION_BANNER = "v0.0.8"
+const VERSION_BANNER = "v0.0.9"
 
 export function activate(context: vscode.ExtensionContext): void {
     console.log(`[baywatch] extension activate ${VERSION_BANNER}`)
@@ -113,11 +113,11 @@ export function activate(context: vscode.ExtensionContext): void {
                 reviewLinkedBundleCommand(issue, runsProvider, () => void refreshAll())
             )
         ),
-        vscode.commands.registerCommand("baywatch.openIssueOnGithub", (issue?: IssueRef) => {
-            if (issue?.url) openInVscode(issue.url)
+        vscode.commands.registerCommand("baywatch.openIssueOnGithub", async (issue?: IssueRef) => {
+            if (issue?.url) await openOnGithub(issue.url, "issue")
         }),
-        vscode.commands.registerCommand("baywatch.openPrOnGithub", (pr?: PrRef) => {
-            if (pr?.url) openInVscode(pr.url)
+        vscode.commands.registerCommand("baywatch.openPrOnGithub", async (pr?: PrRef) => {
+            if (pr?.url) await openOnGithub(pr.url, "pr")
         }),
         vscode.commands.registerCommand("baywatch.tailLog", (run?: RunEntry) => {
             if (run) tailRun(run)
@@ -178,11 +178,37 @@ function runInTerminal(name: string, command: string): vscode.Terminal {
     return term
 }
 
-// Open a URL inside VS Code's Simple Browser tab instead of the OS browser, so the
-// user's editor stays the focused surface. The Simple Browser is built-in to VS Code
-// (no extension needed).
-function openInVscode(url: string): void {
-    void vscode.commands.executeCommand("simpleBrowser.show", url)
+// Open a GitHub URL using the official GitHub Pull Requests extension's internal
+// view (`pr.openDescription` / `issue.openIssue`) when possible. Falls back to the OS
+// browser if the extension isn't installed or rejects the call.
+async function openOnGithub(url: string, kind: "pr" | "issue"): Promise<void> {
+    const cmd = kind === "pr" ? "pr.openDescription" : "issue.openIssue"
+    const ext = vscode.extensions.getExtension("GitHub.vscode-pull-request-github")
+    if (ext) {
+        if (!ext.isActive) {
+            try {
+                await ext.activate()
+            } catch (err) {
+                console.warn(`[baywatch] activating GitHub PR extension failed: ${(err as Error).message}`)
+            }
+        }
+        const uri = vscode.Uri.parse(url)
+        // Try with a parsed URI first, then with the raw URL string — the extension's
+        // command signatures aren't part of its public API so we attempt the most
+        // common shapes before giving up.
+        for (const arg of [uri, url] as const) {
+            try {
+                await vscode.commands.executeCommand(cmd, arg)
+                return
+            } catch (err) {
+                console.log(
+                    `[baywatch] ${cmd} with ${typeof arg === "string" ? "string" : "Uri"} failed: ${(err as Error).message}`
+                )
+            }
+        }
+    }
+    console.log(`[baywatch] falling back to OS browser for ${url}`)
+    await vscode.env.openExternal(vscode.Uri.parse(url))
 }
 
 // Burst-refresh schedule used right after dispatching a run so the new registry entry
