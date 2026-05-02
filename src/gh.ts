@@ -114,9 +114,56 @@ export async function getIssue(ownerRepo: string, num: number): Promise<Issue> {
 
 export type LinkedPR = { number: number; title: string; url: string }
 
+// Returns OPEN PRs that GitHub considers linked to this issue via the "Development"
+// panel (i.e. the user actively linked them in the UI), regardless of which repo
+// they live in. Uses the GraphQL `closedByPullRequestsReferences` field — the same
+// thing the Development panel renders.
+//
+// Only triggered when the user explicitly asks for an issue's bundle (no implicit
+// keyword scanning). Returns full PR records ready for the review prompt.
+export async function findActivelyLinkedOpenPRs(ownerRepo: string, issueNumber: number): Promise<PR[]> {
+    const [owner, repo] = ownerRepo.split("/")
+    if (!owner || !repo) throw new Error(`bad owner/repo: ${ownerRepo}`)
+    const query = `
+        query($owner: String!, $repo: String!, $num: Int!) {
+            repository(owner: $owner, name: $repo) {
+                issue(number: $num) {
+                    closedByPullRequestsReferences(first: 50, includeClosedPrs: false) {
+                        nodes {
+                            number title body url isDraft updatedAt
+                            headRefName headRefOid baseRefName
+                            repository { nameWithOwner }
+                        }
+                    }
+                }
+            }
+        }
+    `.trim()
+    const json = await runGh([
+        "api",
+        "graphql",
+        "-f",
+        `query=${query}`,
+        "-F",
+        `owner=${owner}`,
+        "-F",
+        `repo=${repo}`,
+        "-F",
+        `num=${issueNumber}`,
+    ])
+    const parsed = JSON.parse(json) as {
+        data?: {
+            repository?: { issue?: { closedByPullRequestsReferences?: { nodes?: PR[] } } }
+        }
+    }
+    const nodes = parsed.data?.repository?.issue?.closedByPullRequestsReferences?.nodes
+    if (!nodes) throw new Error(`no linked-PR data returned for ${ownerRepo}#${issueNumber}`)
+    return nodes
+}
+
 // Returns open PRs in `ownerRepo` whose title or body contains a closing keyword
-// referencing the issue (closes/fixes/resolves #N). gh 2.69 doesn't expose
-// `closedByPullRequestsReferences`, so we search and post-filter.
+// referencing the issue (closes/fixes/resolves #N). Used for the issue-discovery
+// blocked-by detection (different from actively-linked PRs above).
 export async function findLinkedOpenPRs(ownerRepo: string, issueNumber: number): Promise<LinkedPR[]> {
     const search = `#${issueNumber} in:body,title`
     const json = await runGh([

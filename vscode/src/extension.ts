@@ -16,7 +16,7 @@ import { updateStatusBar } from "./status-bar.js"
 import type { IssueRef, PrRef, RunEntry } from "./types.js"
 
 // Bumped on every meaningful change so F5/reinstall is verifiable from the activate toast.
-const VERSION_BANNER = "v0.0.5"
+const VERSION_BANNER = "v0.0.6"
 
 export function activate(context: vscode.ExtensionContext): void {
     console.log(`[baywatch] extension activate ${VERSION_BANNER}`)
@@ -105,6 +105,12 @@ export function activate(context: vscode.ExtensionContext): void {
             "baywatch.queueIssueAction",
             guarded("issue action", (issue?: IssueRef) =>
                 queueIssueActionCommand(issue, runsProvider, () => void refreshAll())
+            )
+        ),
+        vscode.commands.registerCommand(
+            "baywatch.reviewLinkedBundle",
+            guarded("review linked bundle", (issue?: IssueRef) =>
+                reviewLinkedBundleCommand(issue, runsProvider, () => void refreshAll())
             )
         ),
         vscode.commands.registerCommand("baywatch.tailLog", (run?: RunEntry) => {
@@ -334,6 +340,31 @@ async function queueIssueActionCommand(
     if (parsed) provider.addPending("dev", parsed.ownerRepo, `issue-${parsed.number}`)
     const term = runInTerminal(`baywatch dev ${issue.ref}`, `baywatch dev --only ${issue.ref}`)
     notifyDispatch("dev", issue.ref, term)
+    scheduleBurstRefresh(refresh)
+}
+
+async function reviewLinkedBundleCommand(
+    issue: IssueRef | undefined,
+    provider: RunsTreeDataProvider,
+    refresh: () => void
+): Promise<void> {
+    if (!issue) {
+        void vscode.window.showInformationMessage("Right-click an issue to review its linked PRs as a bundle.")
+        return
+    }
+    if (issue.linkedOpenPRs.length === 0) {
+        void vscode.window.showInformationMessage(
+            `${issue.ref} has no linked PRs in the Development panel — link them on GitHub first.`
+        )
+        return
+    }
+    // Add a pending entry for each linked PR so the user sees the runs tree pop with rows.
+    for (const linked of issue.linkedOpenPRs) {
+        const m = linked.url.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/)
+        if (m?.[1] && m[2]) provider.addPending("review", m[1], `pr-${m[2]}`)
+    }
+    const term = runInTerminal(`baywatch review --for-issue ${issue.ref}`, `baywatch review --for-issue ${issue.ref}`)
+    notifyDispatch("review", `bundle for ${issue.ref}`, term)
     scheduleBurstRefresh(refresh)
 }
 

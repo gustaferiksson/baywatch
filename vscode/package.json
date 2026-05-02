@@ -2,7 +2,7 @@
     "name": "baywatch-vscode",
     "displayName": "Baywatch",
     "description": "VS Code surface for the baywatch agent orchestrator. Talks to the `baywatch` CLI; CLI is the source of truth.",
-    "version": "0.0.5",
+    "version": "0.0.6",
     "publisher": "gustaferiksson",
     "private": false,
     "license": "MIT",
@@ -140,6 +140,11 @@
             {
                 "command": "baywatch.queueIssueAction",
                 "title": "Baywatch: Run dev or open PR for this issue"
+            },
+            {
+                "command": "baywatch.reviewLinkedBundle",
+                "title": "Baywatch: Review all PRs linked to this issue",
+                "icon": "$(diff-multiple)"
             }
         ],
         "menus": {
@@ -166,6 +171,16 @@
                 }
             ],
             "view/item/context": [
+                {
+                    "command": "baywatch.reviewLinkedBundle",
+                    "when": "view == baywatch.issueQueue && viewItem == issue-implemented",
+                    "group": "inline@1"
+                },
+                {
+                    "command": "baywatch.reviewLinkedBundle",
+                    "when": "view == baywatch.issueQueue && viewItem == issue-implemented",
+                    "group": "1_action"
+                },
                 {
                     "command": "baywatch.tailLog",
                     "when": "view == baywatch.runs",
@@ -252,6 +267,10 @@
                 },
                 {
                     "command": "baywatch.queueIssueAction",
+                    "when": "false"
+                },
+                {
+                    "command": "baywatch.reviewLinkedBundle",
                     "when": "false"
                 }
             ]

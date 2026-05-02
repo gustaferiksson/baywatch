@@ -114,7 +114,21 @@ const completionSpec: Fig.Spec = {
         {
             name: "review",
             description: "Run the review agent against discovered PRs (+ ad-hoc refs)",
-            options: [dryRunOption, onlyOption, autoOption, limitOption],
+            options: [
+                dryRunOption,
+                onlyOption,
+                autoOption,
+                limitOption,
+                {
+                    name: "--bundle",
+                    description: "Review multiple PRs together as one cross-PR review (use with REFs)",
+                },
+                {
+                    name: "--for-issue",
+                    description: "Review every PR actively linked to this issue via GitHub's Development panel",
+                    args: { name: "issue-ref", description: "owner/repo#num" },
+                },
+            ],
             args: prRefArg,
         },
         {

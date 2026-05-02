@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { reviewBundle } from "./agents/review-bundle.ts"
 import { reviewPR } from "./agents/review-pr.ts"
 import { solveIssue } from "./agents/solve-issue.ts"
 import { formatSize, listCloneCandidates, parseDuration, removeClone } from "./clean.ts"
@@ -21,6 +22,8 @@ COMMANDS
   list prs [--json] [REF ...]                                 PRs assigned + review-requested (+ ad-hoc refs)
   dev [--dry-run] [--only] [--auto] [--limit N] [REF ...]     Run the dev agent (no args + TTY → picker)
   review [--dry-run] [--only] [--auto] [--limit N] [REF ...]  Run the review agent (no args + TTY → picker)
+  review --bundle REF [REF ...]                               Review multiple PRs together as one cross-PR review
+  review --for-issue REF                                      Review every PR actively linked to this issue (Dev panel)
   logs [<id>] [--follow] [--running] [--json] [--limit N]     Recent agent run logs (id picks one; --follow tails; --json for tooling)
   image-build                                                 Rebuild the baywatch-agent podman image
   clean clones [--older-than 14d] [--dry-run]                 Remove ~/.baywatch/clones/ entries older than threshold (skips in-flight)
@@ -47,10 +50,26 @@ const printHelpAndExit = (): never => {
     process.exit(0)
 }
 
-type RunOpts = { dryRun: boolean; limit: number; refs: string[]; only: boolean; auto: boolean }
+type RunOpts = {
+    dryRun: boolean
+    limit: number
+    refs: string[]
+    only: boolean
+    auto: boolean
+    bundle: boolean
+    forIssue: string | null
+}
 
 const parseRunOpts = (argv: string[]): RunOpts => {
-    const out: RunOpts = { dryRun: false, limit: 1, refs: [], only: false, auto: false }
+    const out: RunOpts = {
+        dryRun: false,
+        limit: 1,
+        refs: [],
+        only: false,
+        auto: false,
+        bundle: false,
+        forIssue: null,
+    }
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i]
         if (a === "--dry-run") {
@@ -59,6 +78,14 @@ const parseRunOpts = (argv: string[]): RunOpts => {
             out.only = true
         } else if (a === "--auto") {
             out.auto = true
+        } else if (a === "--bundle") {
+            out.bundle = true
+        } else if (a === "--for-issue") {
+            const v = argv[i + 1]
+            if (v === undefined) throw new Error("--for-issue requires an issue ref (owner/repo#num)")
+            if (!isRef(v)) throw new Error(`bad issue ref for --for-issue: ${v}`)
+            out.forIssue = v
+            i++
         } else if (a === "--limit") {
             const v = argv[i + 1]
             if (v === undefined) throw new Error("--limit requires a value")
@@ -211,6 +238,13 @@ const runDev = async (opts: RunOpts): Promise<void> => {
 const runReview = async (opts: RunOpts): Promise<void> => {
     if (opts.only && opts.refs.length === 0) throw new Error("--only requires at least one REF")
     const cfg = await loadConfig()
+
+    // Bundle mode: review multiple PRs together as one cross-PR review.
+    if (opts.bundle || opts.forIssue) {
+        await reviewBundle({ refs: opts.refs, forIssue: opts.forIssue, config: cfg, dryRun: opts.dryRun })
+        return
+    }
+
     const all = await discoverPRs(cfg, opts.refs)
 
     let prs: typeof all
