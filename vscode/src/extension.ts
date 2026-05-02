@@ -53,10 +53,12 @@ export function activate(context: vscode.ExtensionContext): void {
 
     context.subscriptions.push(
         vscode.commands.registerCommand("baywatch.refreshRuns", () => refreshAll()),
-        vscode.commands.registerCommand("baywatch.runDev", () => runDevCommand(() => void refreshAll())),
-        vscode.commands.registerCommand("baywatch.runReview", () => runReviewCommand(() => void refreshAll())),
+        vscode.commands.registerCommand("baywatch.runDev", () => runDevCommand(runsProvider, () => void refreshAll())),
+        vscode.commands.registerCommand("baywatch.runReview", () =>
+            runReviewCommand(runsProvider, () => void refreshAll())
+        ),
         vscode.commands.registerCommand("baywatch.retryRun", (run?: RunEntry) =>
-            retryRunCommand(run, () => void refreshAll())
+            retryRunCommand(run, runsProvider, () => void refreshAll())
         ),
         vscode.commands.registerCommand("baywatch.openReview", (run?: RunEntry) => openReviewCommand(run)),
         vscode.commands.registerCommand("baywatch.runDoctor", () => doctorCommand()),
@@ -128,9 +130,11 @@ function scheduleBurstRefresh(refresh: () => void): void {
 }
 
 function notifyDispatch(kind: "dev" | "review", ref: string, term: vscode.Terminal): void {
-    void vscode.window.showInformationMessage(`Baywatch: starting ${kind} for ${ref}`, "Show terminal").then((choice) => {
-        if (choice === "Show terminal") term.show(true)
-    })
+    void vscode.window
+        .showInformationMessage(`Baywatch: starting ${kind} for ${ref}`, "Show terminal")
+        .then((choice) => {
+            if (choice === "Show terminal") term.show(true)
+        })
 }
 
 async function pickIssueRef(): Promise<string | undefined> {
@@ -184,20 +188,30 @@ function refDetail(i: {
     return parts.join("  ·  ")
 }
 
-async function runDevCommand(refresh: () => void): Promise<void> {
+async function runDevCommand(provider: RunsTreeDataProvider, refresh: () => void): Promise<void> {
     const ref = await pickIssueRef()
     if (!ref) return
+    const parsed = parseRef(ref)
+    if (parsed) provider.addPending("dev", parsed.ownerRepo, `issue-${parsed.number}`)
     const term = runInTerminal(`baywatch dev ${ref}`, `baywatch dev --only ${ref}`)
     notifyDispatch("dev", ref, term)
     scheduleBurstRefresh(refresh)
 }
 
-async function runReviewCommand(refresh: () => void): Promise<void> {
+async function runReviewCommand(provider: RunsTreeDataProvider, refresh: () => void): Promise<void> {
     const ref = await pickPrRef()
     if (!ref) return
+    const parsed = parseRef(ref)
+    if (parsed) provider.addPending("review", parsed.ownerRepo, `pr-${parsed.number}`)
     const term = runInTerminal(`baywatch review ${ref}`, `baywatch review --only ${ref}`)
     notifyDispatch("review", ref, term)
     scheduleBurstRefresh(refresh)
+}
+
+function parseRef(ref: string): { ownerRepo: string; number: number } | null {
+    const m = ref.match(/^([^/]+\/[^#]+)#(\d+)$/)
+    if (!m?.[1] || !m[2]) return null
+    return { ownerRepo: m[1], number: Number.parseInt(m[2], 10) }
 }
 
 async function editNotesCommand(kind: "issues" | "prs", context: vscode.ExtensionContext): Promise<void> {
@@ -245,7 +259,11 @@ async function startClaudeSessionCommand(): Promise<void> {
     term.sendText(`claude --remote-control "${sessionName.replace(/"/g, '\\"')}"`)
 }
 
-async function retryRunCommand(run: RunEntry | undefined, refresh: () => void): Promise<void> {
+async function retryRunCommand(
+    run: RunEntry | undefined,
+    provider: RunsTreeDataProvider,
+    refresh: () => void
+): Promise<void> {
     if (!run) {
         void vscode.window.showInformationMessage("Right-click a run to retry it.")
         return
@@ -256,6 +274,7 @@ async function retryRunCommand(run: RunEntry | undefined, refresh: () => void): 
         "Retry"
     )
     if (confirm !== "Retry") return
+    provider.addPending(run.kind, run.ownerRepo, run.target)
     const term = runInTerminal(`baywatch retry #${run.runId}`, `baywatch retry ${run.runId}`)
     notifyDispatch(run.kind, `#${run.runId}`, term)
     scheduleBurstRefresh(refresh)
