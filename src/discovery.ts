@@ -19,12 +19,17 @@ export type DiscoveredIssue = Issue & {
     linkedOpenPRs: LinkedPR[]
 }
 
+import type { ReviewVerdict } from "./reviewVerdict.ts"
+
 export type DiscoveredPR = PR & {
     repoPath: string | null
     reasonForReview: "assigned" | "review-requested" | "watchlist"
     alreadyReviewedAtThisHead: boolean
     lastReviewedAt: number | null
     lastReviewedHead: string | null
+    // Verdict on the last review at the CURRENT head, when one exists.
+    // null if never reviewed at current head, or if the verdict couldn't be parsed.
+    verdictAtCurrentHead: ReviewVerdict
 }
 
 function isBlocked(ownerRepo: string, blocklist: string[]): boolean {
@@ -147,13 +152,15 @@ export async function discoverPRs(config: BaywatchConfig, watchlist: string[] = 
         }
         const full = result.value
         const last = getLatestReviewFor(full.repository.nameWithOwner, full.number)
+        const reviewedAtThisHead = !!last && last.headSha === full.headRefOid
         results.push({
             ...full,
             repoPath: findRepoPath(full.repository.nameWithOwner, config.cloneRoots),
             reasonForReview: candidate.reason,
-            alreadyReviewedAtThisHead: !!last && last.headSha === full.headRefOid,
+            alreadyReviewedAtThisHead: reviewedAtThisHead,
             lastReviewedAt: last?.reviewedAt ?? null,
             lastReviewedHead: last?.headSha ?? null,
+            verdictAtCurrentHead: reviewedAtThisHead ? (last?.verdict ?? null) : null,
         })
     }
     return results

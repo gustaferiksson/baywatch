@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { claudeCode, run } from "@ai-hero/sandcastle"
 import { podman } from "@ai-hero/sandcastle/sandboxes/podman"
@@ -7,6 +7,7 @@ import { loadAgentEnv } from "../agentEnv.ts"
 import { BAYWATCH_ROOT, type BaywatchConfig } from "../config.ts"
 import type { DiscoveredPR } from "../discovery.ts"
 import { readNote } from "../notes.ts"
+import { parseVerdict } from "../reviewVerdict.ts"
 import { completeRun, recordReview, startRun } from "../state.ts"
 
 const SANDBOX_IMAGE = "baywatch-agent"
@@ -111,14 +112,17 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
         }
 
         if (existsSync(reviewHostPath)) {
+            const markdown = readFileSync(reviewHostPath, "utf8")
+            const verdict = parseVerdict(markdown)
             recordReview({
                 ownerRepo,
                 prNumber: pr.number,
                 headSha: pr.headRefOid,
                 reviewedAt: Date.now(),
                 reviewPath: reviewHostPath,
+                verdict,
             })
-            console.log(`[review]   recorded at head ${pr.headRefOid.slice(0, 7)}`)
+            console.log(`[review]   recorded at head ${pr.headRefOid.slice(0, 7)}, verdict: ${verdict ?? "(unparsed)"}`)
         } else {
             console.warn(`[review]   no review markdown produced at ${reviewHostPath}`)
         }

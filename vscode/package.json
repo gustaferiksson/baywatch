@@ -2,7 +2,7 @@
     "name": "baywatch-vscode",
     "displayName": "Baywatch",
     "description": "VS Code surface for the baywatch agent orchestrator. Talks to the `baywatch` CLI; CLI is the source of truth.",
-    "version": "0.0.4",
+    "version": "0.0.5",
     "publisher": "gustaferiksson",
     "private": false,
     "license": "MIT",

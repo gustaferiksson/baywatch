@@ -56,7 +56,12 @@ function migrate(db: Database): void {
     if (!cols.includes("agent_clone_path")) db.exec("ALTER TABLE runs ADD COLUMN agent_clone_path TEXT")
     if (!cols.includes("review_path")) db.exec("ALTER TABLE runs ADD COLUMN review_path TEXT")
     if (!cols.includes("error_summary")) db.exec("ALTER TABLE runs ADD COLUMN error_summary TEXT")
+
+    const reviewCols = (db.query("PRAGMA table_info(reviews)").all() as { name: string }[]).map((c) => c.name)
+    if (!reviewCols.includes("verdict")) db.exec("ALTER TABLE reviews ADD COLUMN verdict TEXT")
 }
+
+import type { ReviewVerdict } from "./reviewVerdict.ts"
 
 export type ReviewRecord = {
     id: number
@@ -66,6 +71,7 @@ export type ReviewRecord = {
     reviewedAt: number
     reviewPath: string
     submittedAt: number | null
+    verdict: ReviewVerdict
 }
 
 type ReviewRow = {
@@ -76,6 +82,7 @@ type ReviewRow = {
     reviewed_at: number
     review_path: string
     submitted_at: number | null
+    verdict: string | null
 }
 
 function rowToReview(row: ReviewRow): ReviewRecord {
@@ -87,6 +94,7 @@ function rowToReview(row: ReviewRow): ReviewRecord {
         reviewedAt: row.reviewed_at,
         reviewPath: row.review_path,
         submittedAt: row.submitted_at,
+        verdict: (row.verdict as ReviewVerdict) ?? null,
     }
 }
 
@@ -100,12 +108,15 @@ export function getLatestReviewFor(ownerRepo: string, prNumber: number): ReviewR
 
 export function recordReview(rec: Omit<ReviewRecord, "id" | "submittedAt">): void {
     const stmt = getDb().query(
-        `INSERT INTO reviews (owner_repo, pr_number, head_sha, reviewed_at, review_path)
-         VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO reviews (owner_repo, pr_number, head_sha, reviewed_at, review_path, verdict)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT (owner_repo, pr_number, head_sha)
-         DO UPDATE SET reviewed_at = excluded.reviewed_at, review_path = excluded.review_path`
+         DO UPDATE SET
+            reviewed_at = excluded.reviewed_at,
+            review_path = excluded.review_path,
+            verdict = excluded.verdict`
     )
-    stmt.run(rec.ownerRepo, rec.prNumber, rec.headSha, rec.reviewedAt, rec.reviewPath)
+    stmt.run(rec.ownerRepo, rec.prNumber, rec.headSha, rec.reviewedAt, rec.reviewPath, rec.verdict)
 }
 
 // ----- runs -----

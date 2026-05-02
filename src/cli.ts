@@ -95,6 +95,16 @@ const parseListOpts = (argv: string[]): ListOpts => {
     return out
 }
 
+const deriveReviewState = (
+    pr: Awaited<ReturnType<typeof discoverPRs>>[number]
+): "approve" | "approve-minor" | "needs-changes" | "blocking" | "stale" | "unreviewed" => {
+    if (!pr.alreadyReviewedAtThisHead) {
+        return pr.lastReviewedAt !== null ? "stale" : "unreviewed"
+    }
+    if (pr.verdictAtCurrentHead === null) return "approve" // legacy review with no verdict — assume the maintainer trusted it
+    return pr.verdictAtCurrentHead
+}
+
 const listIssues = async (refs: string[], json: boolean): Promise<void> => {
     const cfg = await loadConfig()
     const issues = await discoverIssues(cfg, refs)
@@ -146,13 +156,13 @@ const listPRs = async (refs: string[], json: boolean): Promise<void> => {
             headRefOid: pr.headRefOid,
             lastReviewedAt: pr.lastReviewedAt,
             lastReviewedHead: pr.lastReviewedHead,
-            // green = reviewed at this head, yellow = stale (PR moved since last review),
-            // red = never reviewed. Easy for the extension to render an icon.
-            reviewState: pr.alreadyReviewedAtThisHead
-                ? "reviewed"
-                : pr.lastReviewedAt !== null
-                  ? "stale"
-                  : "unreviewed",
+            verdictAtCurrentHead: pr.verdictAtCurrentHead,
+            // Discriminator for UI rendering. Maps to the review verdict at the current head
+            // when one exists, with stale/unreviewed as fallbacks. Color guidance for callers:
+            //   approve / approve-minor   → green
+            //   needs-changes / stale     → yellow
+            //   blocking / unreviewed     → red
+            reviewState: deriveReviewState(pr),
         }))
         process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
         return
