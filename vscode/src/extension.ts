@@ -13,7 +13,13 @@ import { RunsTreeDataProvider } from "./runs-tree.js"
 import { updateStatusBar } from "./status-bar.js"
 import type { RunEntry } from "./types.js"
 
+// Bumped on every meaningful change so F5/reinstall is verifiable from the activate toast.
+const VERSION_BANNER = "v0.0.2"
+
 export function activate(context: vscode.ExtensionContext): void {
+    console.log(`[baywatch] extension activate ${VERSION_BANNER}`)
+    void vscode.window.showInformationMessage(`Baywatch ${VERSION_BANNER} ready`)
+
     const runsProvider = new RunsTreeDataProvider()
     const reviewsProvider = new ReviewsTreeDataProvider()
 
@@ -65,7 +71,10 @@ export function activate(context: vscode.ExtensionContext): void {
         }
 
     context.subscriptions.push(
-        vscode.commands.registerCommand("baywatch.refreshRuns", guarded("refresh", () => refreshAll())),
+        vscode.commands.registerCommand(
+            "baywatch.refreshRuns",
+            guarded("refresh", () => refreshAll())
+        ),
         vscode.commands.registerCommand(
             "baywatch.runDev",
             guarded("run dev", () => runDevCommand(runsProvider, () => void refreshAll()))
