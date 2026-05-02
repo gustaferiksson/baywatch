@@ -51,14 +51,32 @@ export function activate(context: vscode.ExtensionContext): void {
         }
     }
 
+    // Wrap any registered handler so an unhandled rejection surfaces as an error toast
+    // instead of disappearing silently into VS Code's command error sink.
+    const guarded =
+        <Args extends unknown[]>(label: string, fn: (...args: Args) => Promise<void> | void) =>
+        async (...args: Args): Promise<void> => {
+            try {
+                await fn(...args)
+            } catch (err) {
+                console.error(`[baywatch] ${label} failed:`, err)
+                void vscode.window.showErrorMessage(`Baywatch: ${label} failed — ${(err as Error).message}`)
+            }
+        }
+
     context.subscriptions.push(
-        vscode.commands.registerCommand("baywatch.refreshRuns", () => refreshAll()),
-        vscode.commands.registerCommand("baywatch.runDev", () => runDevCommand(runsProvider, () => void refreshAll())),
-        vscode.commands.registerCommand("baywatch.runReview", () =>
-            runReviewCommand(runsProvider, () => void refreshAll())
+        vscode.commands.registerCommand("baywatch.refreshRuns", guarded("refresh", () => refreshAll())),
+        vscode.commands.registerCommand(
+            "baywatch.runDev",
+            guarded("run dev", () => runDevCommand(runsProvider, () => void refreshAll()))
         ),
-        vscode.commands.registerCommand("baywatch.retryRun", (run?: RunEntry) =>
-            retryRunCommand(run, runsProvider, () => void refreshAll())
+        vscode.commands.registerCommand(
+            "baywatch.runReview",
+            guarded("run review", () => runReviewCommand(runsProvider, () => void refreshAll()))
+        ),
+        vscode.commands.registerCommand(
+            "baywatch.retryRun",
+            guarded("retry", (run?: RunEntry) => retryRunCommand(run, runsProvider, () => void refreshAll()))
         ),
         vscode.commands.registerCommand("baywatch.openReview", (run?: RunEntry) => openReviewCommand(run)),
         vscode.commands.registerCommand("baywatch.runDoctor", () => doctorCommand()),
