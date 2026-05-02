@@ -98,6 +98,36 @@ export async function listReviewRequestedPRs(): Promise<ThinPR[]> {
     return JSON.parse(json) as ThinPR[]
 }
 
+export async function listAuthoredPRs(): Promise<ThinPR[]> {
+    const json = await runGh([
+        "search",
+        "prs",
+        "--author",
+        "@me",
+        "--state",
+        "open",
+        "--limit",
+        "100",
+        "--json",
+        SEARCH_PR_FIELDS,
+    ])
+    return JSON.parse(json) as ThinPR[]
+}
+
+// Returns process.env with GITHUB_TOKEN/GH_TOKEN scrubbed, so callers spawning gh
+// directly (e.g. `gh pr checkout` with stdio: inherit, where runGh's pipe-and-capture
+// shape doesn't fit) can use the user's `gh auth login` rather than the read-only
+// PAT we ship into the sandbox.
+export function hostGhEnv(): Record<string, string> {
+    const env: Record<string, string> = {}
+    for (const [k, v] of Object.entries(process.env)) {
+        if (v === undefined) continue
+        if (k === "GITHUB_TOKEN" || k === "GH_TOKEN") continue
+        env[k] = v
+    }
+    return env
+}
+
 export async function getPR(ownerRepo: string, num: number): Promise<PR> {
     const json = await runGh(["pr", "view", String(num), "--repo", ownerRepo, "--json", FULL_PR_FIELDS])
     const parsed = JSON.parse(json) as Omit<PR, "repository">

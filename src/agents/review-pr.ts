@@ -3,10 +3,13 @@ import path from "node:path"
 import { claudeCode, run } from "@ai-hero/sandcastle"
 import { podman } from "@ai-hero/sandcastle/sandboxes/podman"
 
+import { createReviewClone } from "../agentClone.ts"
 import { loadAgentEnv } from "../agentEnv.ts"
 import { BAYWATCH_ROOT, type BaywatchConfig } from "../config.ts"
 import type { DiscoveredPR } from "../discovery.ts"
+import { hostGhEnv } from "../gh.ts"
 import { readNote } from "../notes.ts"
+import { prepRepo } from "../prep.ts"
 import { parseVerdict } from "../reviewVerdict.ts"
 import { completeRun, recordReview, startRun } from "../state.ts"
 
@@ -23,6 +26,10 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
 
     if (pr.alreadyReviewedAtThisHead) {
         console.log(`[review] ${ownerRepo}#${pr.number} — already reviewed at ${pr.headRefOid.slice(0, 7)}, skipping`)
+        return
+    }
+    if (!pr.repoPath) {
+        console.error(`[review] no local clone for ${ownerRepo}; skipping PR #${pr.number}`)
         return
     }
 
@@ -44,16 +51,9 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
         return
     }
 
-    // Pre-fetch the diff on the host. The sandbox has no gh auth, so the agent reads it
-    // from the prompt rather than calling gh inside the container. Scrub GITHUB_TOKEN
-    // from the host call so we use the user's `gh auth login` (broader scope) rather
-    // than the read-only PAT we ship into the agent.
-    const ghEnv: Record<string, string> = {}
-    for (const [k, v] of Object.entries(process.env)) {
-        if (v !== undefined && k !== "GITHUB_TOKEN" && k !== "GH_TOKEN") ghEnv[k] = v
-    }
+    // Pre-fetch the diff on the host — the agent has it in the prompt, doesn't need gh.
     const ghProc = Bun.spawn(["gh", "pr", "diff", String(pr.number), "--repo", ownerRepo], {
-        env: ghEnv,
+        env: hostGhEnv(),
         stdout: "pipe",
         stderr: "pipe",
     })
@@ -62,10 +62,21 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
         throw new Error(`gh pr diff ${ownerRepo}#${pr.number} failed`)
     }
 
+    // Fresh clone of the user's main repo + checkout the PR's branch, so the agent
+    // reviews the PR with real working files (not just the diff). User's main clone
+    // stays untouched, parallel reviews don't collide.
+    const prep = await prepRepo({ ownerRepo, config })
+    const clone = await createReviewClone({ ownerRepo, mainClonePath: prep.repoPath, prNumber: pr.number })
+    console.log(`[review]   review clone ready at ${clone.path} (branch: ${clone.branch})`)
+
+    const hooks = prep.installCmd ? { sandbox: { onSandboxReady: [{ command: prep.installCmd }] } } : undefined
+
     const runId = startRun({
         kind: "review",
         ownerRepo,
         target: `pr-${pr.number}`,
+        branch: clone.branch,
+        agentClonePath: clone.path,
         reviewPath: reviewHostPath,
     })
 
@@ -81,10 +92,8 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
                     { hostPath: SETTINGS_HOST_PATH, sandboxPath: SETTINGS_SANDBOX_PATH, readonly: true },
                 ],
             }),
-            // Review reads the diff from the prompt — no need for the agent to be on the
-            // PR's branch (or any specific branch). Use BAYWATCH_ROOT so reviews don't
-            // depend on whatever the user has checked out in their main clone.
-            cwd: BAYWATCH_ROOT,
+            cwd: clone.path,
+            ...(hooks ? { hooks } : {}),
             promptFile: PROMPT_PATH,
             promptArgs: {
                 PR_REPO: ownerRepo,
@@ -101,7 +110,7 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
                 ADDITIONAL_NOTES: readNote(`${ownerRepo}#${pr.number}`) ?? "(none — review from the diff alone)",
             },
             branchStrategy: { type: "head" },
-            name: `review-${ownerRepo.replace("/", "-")}-${pr.number}`,
+            name: `review-${pr.number}`,
         })
 
         console.log(`[review]   done: ${result.iterations.length} iteration(s)`)

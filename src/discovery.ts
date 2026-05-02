@@ -7,6 +7,7 @@ import {
     type LinkedPR,
     listAssignedIssues,
     listAssignedPRs,
+    listAuthoredPRs,
     listReviewRequestedPRs,
     type PR,
     type ThinPR,
@@ -23,7 +24,7 @@ import type { ReviewVerdict } from "./reviewVerdict.ts"
 
 export type DiscoveredPR = PR & {
     repoPath: string | null
-    reasonForReview: "assigned" | "review-requested" | "watchlist"
+    reasonForReview: "assigned" | "review-requested" | "own" | "watchlist"
     alreadyReviewedAtThisHead: boolean
     lastReviewedAt: number | null
     lastReviewedHead: string | null
@@ -98,9 +99,13 @@ type Candidate = {
 }
 
 export async function discoverPRs(config: BaywatchConfig, watchlist: string[] = []): Promise<DiscoveredPR[]> {
-    const [assigned, reviewRequested] = await Promise.all([listAssignedPRs(), listReviewRequestedPRs()])
+    const [assigned, reviewRequested, authored] = await Promise.all([
+        listAssignedPRs(),
+        listReviewRequestedPRs(),
+        listAuthoredPRs(),
+    ])
 
-    // Dedupe (assigned takes precedence over review-requested if both apply).
+    // Dedupe by `owner/repo#num`. First-wins precedence: assigned > review-requested > own.
     const candidates = new Map<string, Candidate>()
     const addCandidate = (thin: ThinPR, reason: Candidate["reason"]): void => {
         const key = `${thin.repository.nameWithOwner}#${thin.number}`
@@ -110,6 +115,7 @@ export async function discoverPRs(config: BaywatchConfig, watchlist: string[] = 
     }
     for (const pr of assigned) addCandidate(pr, "assigned")
     for (const pr of reviewRequested) addCandidate(pr, "review-requested")
+    for (const pr of authored) addCandidate(pr, "own")
 
     // One-shot watchlist refs from the CLI: "owner/repo#123"
     for (const entry of watchlist) {
