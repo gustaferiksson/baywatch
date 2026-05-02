@@ -2,7 +2,6 @@ import { existsSync, mkdirSync } from "node:fs"
 import path from "node:path"
 import { claudeCode, run } from "@ai-hero/sandcastle"
 import { podman } from "@ai-hero/sandcastle/sandboxes/podman"
-import { $ } from "bun"
 
 import { loadAgentEnv } from "../agentEnv.ts"
 import { BAYWATCH_ROOT, type BaywatchConfig } from "../config.ts"
@@ -49,8 +48,22 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
     }
 
     // Pre-fetch the diff on the host. The sandbox has no gh auth, so the agent reads it
-    // from the prompt rather than calling gh inside the container.
-    const diff = await $`gh pr diff ${pr.number} --repo ${ownerRepo}`.text()
+    // from the prompt rather than calling gh inside the container. Scrub GITHUB_TOKEN
+    // from the host call so we use the user's `gh auth login` (broader scope) rather
+    // than the read-only PAT we ship into the agent.
+    const ghEnv: Record<string, string> = {}
+    for (const [k, v] of Object.entries(process.env)) {
+        if (v !== undefined && k !== "GITHUB_TOKEN" && k !== "GH_TOKEN") ghEnv[k] = v
+    }
+    const ghProc = Bun.spawn(["gh", "pr", "diff", String(pr.number), "--repo", ownerRepo], {
+        env: ghEnv,
+        stdout: "pipe",
+        stderr: "pipe",
+    })
+    const diff = await new Response(ghProc.stdout).text()
+    if ((await ghProc.exited) !== 0) {
+        throw new Error(`gh pr diff ${ownerRepo}#${pr.number} failed`)
+    }
 
     const runId = startRun({
         kind: "review",

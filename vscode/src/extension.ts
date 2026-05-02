@@ -165,7 +165,9 @@ function notifyDispatch(kind: "dev" | "review", ref: string, term: vscode.Termin
 }
 
 async function pickIssueRef(): Promise<string | undefined> {
+    console.log("[baywatch] pickIssueRef: listIssueRefs")
     const items = await listIssueRefs()
+    console.log(`[baywatch] pickIssueRef: got ${items.length} item(s)`)
     if (items.length === 0) {
         void vscode.window.showInformationMessage("No issues discovered.")
         return undefined
@@ -183,7 +185,9 @@ async function pickIssueRef(): Promise<string | undefined> {
 }
 
 async function pickPrRef(): Promise<string | undefined> {
+    console.log("[baywatch] pickPrRef: listPrRefs")
     const items = await listPrRefs()
+    console.log(`[baywatch] pickPrRef: got ${items.length} item(s)`)
     if (items.length === 0) {
         void vscode.window.showInformationMessage("No PRs discovered.")
         return undefined
@@ -216,23 +220,29 @@ function refDetail(i: {
 }
 
 async function runDevCommand(provider: RunsTreeDataProvider, refresh: () => void): Promise<void> {
+    console.log("[baywatch] runDev: open picker")
     const ref = await pickIssueRef()
+    console.log(`[baywatch] runDev: picker → ${ref ?? "(cancelled)"}`)
     if (!ref) return
     const parsed = parseRef(ref)
     if (parsed) provider.addPending("dev", parsed.ownerRepo, `issue-${parsed.number}`)
     const term = runInTerminal(`baywatch dev ${ref}`, `baywatch dev --only ${ref}`)
     notifyDispatch("dev", ref, term)
     scheduleBurstRefresh(refresh)
+    console.log("[baywatch] runDev: done")
 }
 
 async function runReviewCommand(provider: RunsTreeDataProvider, refresh: () => void): Promise<void> {
+    console.log("[baywatch] runReview: open picker")
     const ref = await pickPrRef()
+    console.log(`[baywatch] runReview: picker → ${ref ?? "(cancelled)"}`)
     if (!ref) return
     const parsed = parseRef(ref)
     if (parsed) provider.addPending("review", parsed.ownerRepo, `pr-${parsed.number}`)
     const term = runInTerminal(`baywatch review ${ref}`, `baywatch review --only ${ref}`)
     notifyDispatch("review", ref, term)
     scheduleBurstRefresh(refresh)
+    console.log("[baywatch] runReview: done")
 }
 
 function parseRef(ref: string): { ownerRepo: string; number: number } | null {
