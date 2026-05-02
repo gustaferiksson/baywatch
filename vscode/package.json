@@ -2,7 +2,7 @@
     "name": "baywatch-vscode",
     "displayName": "Baywatch",
     "description": "VS Code surface for the baywatch agent orchestrator. Talks to the `baywatch` CLI; CLI is the source of truth.",
-    "version": "0.0.9",
+    "version": "0.0.10",
     "publisher": "gustaferiksson",
     "private": false,
     "license": "MIT",
@@ -150,13 +150,18 @@
             },
             {
                 "command": "baywatch.openIssueOnGithub",
-                "title": "Baywatch: Open issue on GitHub",
+                "title": "Baywatch: Open issue (GitHub PR extension)",
                 "icon": "$(link-external)"
             },
             {
                 "command": "baywatch.openPrOnGithub",
-                "title": "Baywatch: Open PR on GitHub",
+                "title": "Baywatch: Open PR (GitHub PR extension)",
                 "icon": "$(link-external)"
+            },
+            {
+                "command": "baywatch.openInExternalBrowser",
+                "title": "Baywatch: Open in browser",
+                "icon": "$(globe)"
             }
         ],
         "menus": {
@@ -214,6 +219,11 @@
                     "group": "1_action"
                 },
                 {
+                    "command": "baywatch.openInExternalBrowser",
+                    "when": "view == baywatch.issueQueue || view == baywatch.prQueue",
+                    "group": "inline@9"
+                },
+                {
                     "command": "baywatch.openIssueOnGithub",
                     "when": "view == baywatch.issueQueue",
                     "group": "9_open"
@@ -221,6 +231,11 @@
                 {
                     "command": "baywatch.openPrOnGithub",
                     "when": "view == baywatch.prQueue",
+                    "group": "9_open"
+                },
+                {
+                    "command": "baywatch.openInExternalBrowser",
+                    "when": "view == baywatch.issueQueue || view == baywatch.prQueue",
                     "group": "9_open"
                 },
                 {

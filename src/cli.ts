@@ -10,7 +10,7 @@ import { installSpecs } from "./install-specs.ts"
 import { formatAge, formatDuration, listRecentLogs } from "./logs.ts"
 import { noteFilePath, readNote, writeNote } from "./notes.ts"
 import { pickIssues, pickPRs } from "./picker.ts"
-import { getRun } from "./state.ts"
+import { getLatestReviewFor, getRun } from "./state.ts"
 
 const HELP = `baywatch — personal agent orchestrator
 
@@ -171,19 +171,22 @@ const listPRs = async (refs: string[], json: boolean): Promise<void> => {
     const cfg = await loadConfig()
     const prs = await discoverPRs(cfg, refs)
     if (json) {
-        const out = prs.map((pr) => ({
-            ref: `${pr.repository.nameWithOwner}#${pr.number}`,
-            ownerRepo: pr.repository.nameWithOwner,
-            number: pr.number,
-            title: pr.title,
-            url: pr.url,
-            hasClone: pr.repoPath !== null,
-            reasonForReview: pr.reasonForReview,
-            alreadyReviewedAtThisHead: pr.alreadyReviewedAtThisHead,
-            headRefOid: pr.headRefOid,
-            lastReviewedAt: pr.lastReviewedAt,
-            lastReviewedHead: pr.lastReviewedHead,
-            verdictAtCurrentHead: pr.verdictAtCurrentHead,
+        const out = prs.map((pr) => {
+            const last = getLatestReviewFor(pr.repository.nameWithOwner, pr.number)
+            return {
+                ref: `${pr.repository.nameWithOwner}#${pr.number}`,
+                ownerRepo: pr.repository.nameWithOwner,
+                number: pr.number,
+                title: pr.title,
+                url: pr.url,
+                hasClone: pr.repoPath !== null,
+                reasonForReview: pr.reasonForReview,
+                alreadyReviewedAtThisHead: pr.alreadyReviewedAtThisHead,
+                headRefOid: pr.headRefOid,
+                lastReviewedAt: pr.lastReviewedAt,
+                lastReviewedHead: pr.lastReviewedHead,
+                lastReviewPath: last?.reviewPath ?? null,
+                verdictAtCurrentHead: pr.verdictAtCurrentHead,
             // Discriminator for UI rendering. Maps to the review verdict at the current head
             // when one exists, with stale/unreviewed as fallbacks. Color guidance for callers:
             //   approve / approve-minor   → green
@@ -191,7 +194,7 @@ const listPRs = async (refs: string[], json: boolean): Promise<void> => {
             //   blocking / unreviewed     → red
             reviewState: deriveReviewState(pr),
         }))
-        process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
+        process.stdout.write(`$JSON.stringify(out, null, 2)\n`)
         return
     }
     if (prs.length === 0) {

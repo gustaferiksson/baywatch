@@ -50,10 +50,10 @@ Then — and this is what justifies the bundle:
 
 ## Output
 
-Write one markdown file at `{{REVIEW_OUTPUT_PATH}}` with this structure:
+Write one markdown file at `{{REVIEW_OUTPUT_PATH}}` with this structure (sketched here — fill in real content):
 
 ```markdown
-# Bundle review — {{PR_COUNT}} PR(s)
+# Bundle review — N PR(s)
 
 **Reviewed at:** [list each PR + its head SHA, one per line]
 
@@ -61,7 +61,26 @@ Write one markdown file at `{{REVIEW_OUTPUT_PATH}}` with this structure:
 
 …
 
-{{PR_SECTIONS_PLACEHOLDER}}
+## owner/repo#A — Title 1
+
+### Goal
+…
+
+### Goal vs. implementation
+- [severity] file:line — note   (or `_no findings._`)
+
+### Type design
+- [severity] file:line — note
+
+### Visibility
+- [severity] file:line — note
+
+### Code-level notes
+- [severity] file:line — note
+
+## owner/repo#B — Title 2
+
+(same subsections per PR, one heading per bundled PR)
 
 ## Cross-PR cohesion
 
@@ -96,9 +115,9 @@ Write one markdown file at `{{REVIEW_OUTPUT_PATH}}` with this structure:
 …
 ```
 
-For `{{PR_SECTIONS_PLACEHOLDER}}`, write one `## owner/repo#N — Title` section per PR with: Goal, Goal-vs-implementation, Type design, Visibility, Code-level notes. `_no findings._` for empty subsections.
+Repeat the per-PR subsection block once per PR in the bundle (the example above shows two — extend to however many there are). Use `_no findings._` for any empty subsection.
 
-Also write `{{SUBMIT_SCRIPT_PATH}}` — a shell script with one commented-out `gh pr review` line per bundled PR for the maintainer to uncomment selectively.
+Also write the submit-review script — see the path in the prompt above — as a shell script with one commented-out `gh pr review` line per bundled PR for the maintainer to uncomment selectively.
 
 ## Done
 

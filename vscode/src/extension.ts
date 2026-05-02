@@ -16,7 +16,7 @@ import { updateStatusBar } from "./status-bar.js"
 import type { IssueRef, PrRef, RunEntry } from "./types.js"
 
 // Bumped on every meaningful change so F5/reinstall is verifiable from the activate toast.
-const VERSION_BANNER = "v0.0.9"
+const VERSION_BANNER = "v0.0.10"
 
 export function activate(context: vscode.ExtensionContext): void {
     console.log(`[baywatch] extension activate ${VERSION_BANNER}`)
@@ -119,17 +119,24 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.commands.registerCommand("baywatch.openPrOnGithub", async (pr?: PrRef) => {
             if (pr?.url) await openOnGithub(pr.url, "pr")
         }),
+        vscode.commands.registerCommand("baywatch.openInExternalBrowser", async (item?: { url?: string }) => {
+            if (item?.url) await vscode.env.openExternal(vscode.Uri.parse(item.url))
+        }),
         vscode.commands.registerCommand("baywatch.tailLog", (run?: RunEntry) => {
             if (run) tailRun(run)
         }),
-        vscode.commands.registerCommand("baywatch.openLog", async (run?: RunEntry) => {
-            if (!run?.logPath) {
-                void vscode.window.showInformationMessage("No log file recorded for this run yet.")
-                return
-            }
-            const doc = await vscode.workspace.openTextDocument(run.logPath)
-            await vscode.window.showTextDocument(doc)
-        }),
+        vscode.commands.registerCommand(
+            "baywatch.openLog",
+            guarded("open log", async (run?: RunEntry) => {
+                console.log(`[baywatch] openLog #${run?.runId} logPath=${run?.logPath ?? "(none)"}`)
+                if (!run?.logPath) {
+                    void vscode.window.showInformationMessage("No log file recorded for this run yet.")
+                    return
+                }
+                const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(run.logPath))
+                await vscode.window.showTextDocument(doc, { preview: false })
+            })
+        ),
         vscode.commands.registerCommand("baywatch.openClone", async (run?: RunEntry) => {
             if (!run) return
             const detail = await getRun(run.runId)

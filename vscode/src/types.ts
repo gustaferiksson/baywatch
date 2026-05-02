@@ -53,6 +53,7 @@ export type PrRef = {
     number: number
     lastReviewedAt: number | null
     lastReviewedHead: string | null
+    lastReviewPath: string | null
     verdictAtCurrentHead: "approve" | "approve-minor" | "needs-changes" | "blocking" | null
     reviewState: "approve" | "approve-minor" | "needs-changes" | "blocking" | "stale" | "unreviewed"
 }

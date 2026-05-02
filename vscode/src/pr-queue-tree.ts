@@ -36,11 +36,20 @@ export class PrQueueTreeDataProvider implements vscode.TreeDataProvider<PrRef> {
         )
         item.iconPath = stateIcon(pr.reviewState)
         item.contextValue = `pr-${pr.reviewState}`
-        // Click opens the PR in the browser; the action button runs the review agent.
-        item.command = {
-            command: "baywatch.openPrOnGithub",
-            title: "Open PR on GitHub",
-            arguments: [pr],
+        // Click opens the review markdown if one exists for this PR — that's where the
+        // outcome lives. If there's no review yet, fall back to the PR view.
+        if (pr.lastReviewPath) {
+            item.command = {
+                command: "vscode.open",
+                title: "Open review outcome",
+                arguments: [vscode.Uri.file(pr.lastReviewPath)],
+            }
+        } else {
+            item.command = {
+                command: "baywatch.openPrOnGithub",
+                title: "Open PR",
+                arguments: [pr],
+            }
         }
         return item
     }
