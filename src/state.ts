@@ -12,7 +12,12 @@ export function getDb(): Database {
     if (_db) return _db
     if (!existsSync(STATE_DIR)) mkdirSync(STATE_DIR, { recursive: true })
     const db = new Database(DB_PATH)
+    // WAL allows concurrent readers + one writer; busy_timeout makes briefly-contended
+    // reads (e.g. the VS Code extension polling `baywatch logs --json` while an agent
+    // is mid-completeRun) wait instead of erroring with SQLITE_BUSY.
     db.exec("PRAGMA journal_mode = WAL")
+    db.exec("PRAGMA busy_timeout = 5000")
+    db.exec("PRAGMA synchronous = NORMAL")
     migrate(db)
     _db = db
     return db

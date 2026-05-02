@@ -1,13 +1,13 @@
 {
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "name": "Run Baywatch Extension",
-            "type": "extensionHost",
-            "request": "launch",
-            "args": ["--extensionDevelopmentPath=${workspaceFolder}/vscode"],
-            "outFiles": ["${workspaceFolder}/vscode/dist/**/*.js"],
-            "preLaunchTask": "build extension"
-        }
-    ]
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Baywatch Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}/vscode"],
+      "outFiles": ["${workspaceFolder}/vscode/dist/**/*.js"],
+      "preLaunchTask": "build extension"
+    }
+  ]
 }
