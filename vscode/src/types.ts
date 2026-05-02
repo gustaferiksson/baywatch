@@ -27,14 +27,18 @@ export type DoctorCheck = {
     hint?: string
 }
 
+export type LinkedPR = { number: number; title: string; url: string }
+
 export type IssueRef = {
     ref: string
     title: string
     hasClone: boolean
     blockedByPRs: number[]
+    linkedOpenPRs: LinkedPR[]
     url: string
     ownerRepo: string
     number: number
+    state: "open" | "implemented"
 }
 
 export type PrRef = {
@@ -47,4 +51,7 @@ export type PrRef = {
     url: string
     ownerRepo: string
     number: number
+    lastReviewedAt: number | null
+    lastReviewedHead: string | null
+    reviewState: "reviewed" | "stale" | "unreviewed"
 }

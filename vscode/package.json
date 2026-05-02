@@ -2,7 +2,7 @@
     "name": "baywatch-vscode",
     "displayName": "Baywatch",
     "description": "VS Code surface for the baywatch agent orchestrator. Talks to the `baywatch` CLI; CLI is the source of truth.",
-    "version": "0.0.2",
+    "version": "0.0.4",
     "publisher": "gustaferiksson",
     "private": false,
     "license": "MIT",
@@ -43,8 +43,16 @@
                     "name": "Runs"
                 },
                 {
+                    "id": "baywatch.issueQueue",
+                    "name": "Issue queue"
+                },
+                {
+                    "id": "baywatch.prQueue",
+                    "name": "Review queue"
+                },
+                {
                     "id": "baywatch.reviews",
-                    "name": "Reviews"
+                    "name": "Past reviews"
                 }
             ]
         },
@@ -124,6 +132,14 @@
             {
                 "command": "baywatch.cleanClones",
                 "title": "Baywatch: Clean old agent clones"
+            },
+            {
+                "command": "baywatch.queueReviewPr",
+                "title": "Baywatch: Review this PR"
+            },
+            {
+                "command": "baywatch.queueIssueAction",
+                "title": "Baywatch: Run dev or open PR for this issue"
             }
         ],
         "menus": {
@@ -145,7 +161,7 @@
                 },
                 {
                     "command": "baywatch.refreshRuns",
-                    "when": "view == baywatch.runs || view == baywatch.reviews",
+                    "when": "view == baywatch.runs || view == baywatch.reviews || view == baywatch.prQueue || view == baywatch.issueQueue",
                     "group": "navigation@99"
                 }
             ],
@@ -228,6 +244,14 @@
                 },
                 {
                     "command": "baywatch.openPR",
+                    "when": "false"
+                },
+                {
+                    "command": "baywatch.queueReviewPr",
+                    "when": "false"
+                },
+                {
+                    "command": "baywatch.queueIssueAction",
                     "when": "false"
                 }
             ]

@@ -106,7 +106,12 @@ const listIssues = async (refs: string[], json: boolean): Promise<void> => {
             title: i.title,
             url: i.url,
             hasClone: i.repoPath !== null,
+            // Full LinkedPR objects (not just numbers) so the extension can open the PR URL.
+            linkedOpenPRs: i.linkedOpenPRs,
+            // Kept for backwards-compat with consumers that just look at the count.
             blockedByPRs: i.linkedOpenPRs.map((pr) => pr.number),
+            // green = PR exists (implemented), red = no PR yet (fresh).
+            state: i.linkedOpenPRs.length > 0 ? "implemented" : "open",
         }))
         process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
         return
@@ -139,6 +144,15 @@ const listPRs = async (refs: string[], json: boolean): Promise<void> => {
             reasonForReview: pr.reasonForReview,
             alreadyReviewedAtThisHead: pr.alreadyReviewedAtThisHead,
             headRefOid: pr.headRefOid,
+            lastReviewedAt: pr.lastReviewedAt,
+            lastReviewedHead: pr.lastReviewedHead,
+            // green = reviewed at this head, yellow = stale (PR moved since last review),
+            // red = never reviewed. Easy for the extension to render an icon.
+            reviewState: pr.alreadyReviewedAtThisHead
+                ? "reviewed"
+                : pr.lastReviewedAt !== null
+                  ? "stale"
+                  : "unreviewed",
         }))
         process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
         return

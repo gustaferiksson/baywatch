@@ -23,6 +23,8 @@ export type DiscoveredPR = PR & {
     repoPath: string | null
     reasonForReview: "assigned" | "review-requested" | "watchlist"
     alreadyReviewedAtThisHead: boolean
+    lastReviewedAt: number | null
+    lastReviewedHead: string | null
 }
 
 function isBlocked(ownerRepo: string, blocklist: string[]): boolean {
@@ -150,6 +152,8 @@ export async function discoverPRs(config: BaywatchConfig, watchlist: string[] = 
             repoPath: findRepoPath(full.repository.nameWithOwner, config.cloneRoots),
             reasonForReview: candidate.reason,
             alreadyReviewedAtThisHead: !!last && last.headSha === full.headRefOid,
+            lastReviewedAt: last?.reviewedAt ?? null,
+            lastReviewedHead: last?.headSha ?? null,
         })
     }
     return results

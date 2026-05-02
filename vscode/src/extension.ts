@@ -6,25 +6,31 @@
 import * as vscode from "vscode"
 
 import { getRun, listIssueRefs, listPrRefs, runDoctor } from "./cli.js"
+import { IssueQueueTreeDataProvider } from "./issue-queue-tree.js"
 import { tailRun } from "./log-channel.js"
 import { openNotesPanel } from "./notes-panel.js"
+import { PrQueueTreeDataProvider } from "./pr-queue-tree.js"
 import { ReviewsTreeDataProvider } from "./reviews-tree.js"
 import { RunsTreeDataProvider } from "./runs-tree.js"
 import { updateStatusBar } from "./status-bar.js"
-import type { RunEntry } from "./types.js"
+import type { IssueRef, PrRef, RunEntry } from "./types.js"
 
 // Bumped on every meaningful change so F5/reinstall is verifiable from the activate toast.
-const VERSION_BANNER = "v0.0.2"
+const VERSION_BANNER = "v0.0.4"
 
 export function activate(context: vscode.ExtensionContext): void {
     console.log(`[baywatch] extension activate ${VERSION_BANNER}`)
     void vscode.window.showInformationMessage(`Baywatch ${VERSION_BANNER} ready`)
 
     const runsProvider = new RunsTreeDataProvider()
+    const issueQueueProvider = new IssueQueueTreeDataProvider()
+    const prQueueProvider = new PrQueueTreeDataProvider()
     const reviewsProvider = new ReviewsTreeDataProvider()
 
     context.subscriptions.push(
         vscode.window.registerTreeDataProvider("baywatch.runs", runsProvider),
+        vscode.window.registerTreeDataProvider("baywatch.issueQueue", issueQueueProvider),
+        vscode.window.registerTreeDataProvider("baywatch.prQueue", prQueueProvider),
         vscode.window.registerTreeDataProvider("baywatch.reviews", reviewsProvider)
     )
 
@@ -33,6 +39,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const refreshAll = async (): Promise<void> => {
         runsProvider.refresh()
+        issueQueueProvider.refresh()
+        prQueueProvider.refresh()
         reviewsProvider.refresh()
         await updateStatusBar(context)
         // Auto-show the log channel for runs that just flipped to failed.
@@ -89,6 +97,16 @@ export function activate(context: vscode.ExtensionContext): void {
         ),
         vscode.commands.registerCommand("baywatch.openReview", (run?: RunEntry) => openReviewCommand(run)),
         vscode.commands.registerCommand("baywatch.runDoctor", () => doctorCommand()),
+        vscode.commands.registerCommand(
+            "baywatch.queueReviewPr",
+            guarded("review queued PR", (pr?: PrRef) => queueReviewPrCommand(pr, runsProvider, () => void refreshAll()))
+        ),
+        vscode.commands.registerCommand(
+            "baywatch.queueIssueAction",
+            guarded("issue action", (issue?: IssueRef) =>
+                queueIssueActionCommand(issue, runsProvider, () => void refreshAll())
+            )
+        ),
         vscode.commands.registerCommand("baywatch.tailLog", (run?: RunEntry) => {
             if (run) tailRun(run)
         }),
@@ -294,6 +312,42 @@ async function startClaudeSessionCommand(): Promise<void> {
     const term = vscode.window.createTerminal({ name: `claude · ${sessionName}`, cwd: target })
     term.show(true)
     term.sendText(`claude --remote-control "${sessionName.replace(/"/g, '\\"')}"`)
+}
+
+async function queueIssueActionCommand(
+    issue: IssueRef | undefined,
+    provider: RunsTreeDataProvider,
+    refresh: () => void
+): Promise<void> {
+    if (!issue) return
+    // If a PR already exists for this issue, default to opening it — that's what the
+    // user is implicitly checking when they click a green issue.
+    if (issue.state === "implemented") {
+        const first = issue.linkedOpenPRs[0]
+        if (first) {
+            await vscode.env.openExternal(vscode.Uri.parse(first.url))
+            return
+        }
+    }
+    // Otherwise: red issue → run the dev agent on it.
+    const parsed = parseRef(issue.ref)
+    if (parsed) provider.addPending("dev", parsed.ownerRepo, `issue-${parsed.number}`)
+    const term = runInTerminal(`baywatch dev ${issue.ref}`, `baywatch dev --only ${issue.ref}`)
+    notifyDispatch("dev", issue.ref, term)
+    scheduleBurstRefresh(refresh)
+}
+
+async function queueReviewPrCommand(
+    pr: PrRef | undefined,
+    provider: RunsTreeDataProvider,
+    refresh: () => void
+): Promise<void> {
+    if (!pr) return
+    const parsed = parseRef(pr.ref)
+    if (parsed) provider.addPending("review", parsed.ownerRepo, `pr-${parsed.number}`)
+    const term = runInTerminal(`baywatch review ${pr.ref}`, `baywatch review --only ${pr.ref}`)
+    notifyDispatch("review", pr.ref, term)
+    scheduleBurstRefresh(refresh)
 }
 
 async function retryRunCommand(
