@@ -112,10 +112,25 @@ export function deactivate(): void {}
 
 // ---------- command bodies ----------
 
-function runInTerminal(name: string, command: string): void {
+function runInTerminal(name: string, command: string): vscode.Terminal {
     const term = vscode.window.createTerminal({ name })
     term.show(true)
     term.sendText(command)
+    return term
+}
+
+// Burst-refresh schedule used right after dispatching a run so the new registry entry
+// shows up fast, instead of waiting for the next 10s tick.
+function scheduleBurstRefresh(refresh: () => void): void {
+    for (const delayMs of [500, 1500, 3000, 6000, 10_000]) {
+        setTimeout(refresh, delayMs)
+    }
+}
+
+function notifyDispatch(kind: "dev" | "review", ref: string, term: vscode.Terminal): void {
+    void vscode.window.showInformationMessage(`Baywatch: starting ${kind} for ${ref}`, "Show terminal").then((choice) => {
+        if (choice === "Show terminal") term.show(true)
+    })
 }
 
 async function pickIssueRef(): Promise<string | undefined> {
@@ -172,15 +187,17 @@ function refDetail(i: {
 async function runDevCommand(refresh: () => void): Promise<void> {
     const ref = await pickIssueRef()
     if (!ref) return
-    runInTerminal(`baywatch dev ${ref}`, `baywatch dev --only ${ref}`)
-    setTimeout(refresh, 750)
+    const term = runInTerminal(`baywatch dev ${ref}`, `baywatch dev --only ${ref}`)
+    notifyDispatch("dev", ref, term)
+    scheduleBurstRefresh(refresh)
 }
 
 async function runReviewCommand(refresh: () => void): Promise<void> {
     const ref = await pickPrRef()
     if (!ref) return
-    runInTerminal(`baywatch review ${ref}`, `baywatch review --only ${ref}`)
-    setTimeout(refresh, 750)
+    const term = runInTerminal(`baywatch review ${ref}`, `baywatch review --only ${ref}`)
+    notifyDispatch("review", ref, term)
+    scheduleBurstRefresh(refresh)
 }
 
 async function editNotesCommand(kind: "issues" | "prs", context: vscode.ExtensionContext): Promise<void> {
@@ -239,10 +256,9 @@ async function retryRunCommand(run: RunEntry | undefined, refresh: () => void): 
         "Retry"
     )
     if (confirm !== "Retry") return
-    const term = vscode.window.createTerminal({ name: `baywatch retry #${run.runId}` })
-    term.show(true)
-    term.sendText(`baywatch retry ${run.runId}`)
-    setTimeout(refresh, 750)
+    const term = runInTerminal(`baywatch retry #${run.runId}`, `baywatch retry ${run.runId}`)
+    notifyDispatch(run.kind, `#${run.runId}`, term)
+    scheduleBurstRefresh(refresh)
 }
 
 async function openReviewCommand(run?: RunEntry): Promise<void> {

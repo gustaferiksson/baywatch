@@ -39,12 +39,18 @@ export class RunsTreeDataProvider implements vscode.TreeDataProvider<RunEntry> {
         return item
     }
 
+    private lastRuns: RunEntry[] = []
+
     async getChildren(): Promise<RunEntry[]> {
         try {
-            return await listRuns({ limit: 50 })
+            this.lastRuns = await listRuns({ limit: 50 })
+            return this.lastRuns
         } catch (err) {
-            void vscode.window.showErrorMessage(`baywatch logs failed: ${(err as Error).message}`)
-            return []
+            // Keep showing the last good state — `baywatch logs` can transiently fail
+            // (e.g. SQLite contention during a write), and clearing the tree on every
+            // hiccup is worse than showing slightly-stale rows.
+            console.error(`[baywatch] logs failed: ${(err as Error).message}`)
+            return this.lastRuns
         }
     }
 }
