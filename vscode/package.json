@@ -2,7 +2,7 @@
     "name": "baywatch-vscode",
     "displayName": "Baywatch",
     "description": "VS Code surface for the baywatch agent orchestrator. Talks to the `baywatch` CLI; CLI is the source of truth.",
-    "version": "0.0.6",
+    "version": "0.0.8",
     "publisher": "gustaferiksson",
     "private": false,
     "license": "MIT",
@@ -135,16 +135,28 @@
             },
             {
                 "command": "baywatch.queueReviewPr",
-                "title": "Baywatch: Review this PR"
+                "title": "Baywatch: Run review on this PR",
+                "icon": "$(play)"
             },
             {
                 "command": "baywatch.queueIssueAction",
-                "title": "Baywatch: Run dev or open PR for this issue"
+                "title": "Baywatch: Run dev on this issue",
+                "icon": "$(play)"
             },
             {
                 "command": "baywatch.reviewLinkedBundle",
                 "title": "Baywatch: Review all PRs linked to this issue",
                 "icon": "$(diff-multiple)"
+            },
+            {
+                "command": "baywatch.openIssueOnGithub",
+                "title": "Baywatch: Open issue on GitHub",
+                "icon": "$(link-external)"
+            },
+            {
+                "command": "baywatch.openPrOnGithub",
+                "title": "Baywatch: Open PR on GitHub",
+                "icon": "$(link-external)"
             }
         ],
         "menus": {
@@ -172,14 +184,44 @@
             ],
             "view/item/context": [
                 {
-                    "command": "baywatch.reviewLinkedBundle",
-                    "when": "view == baywatch.issueQueue && viewItem == issue-implemented",
+                    "command": "baywatch.queueIssueAction",
+                    "when": "view == baywatch.issueQueue && viewItem == issue-open",
                     "group": "inline@1"
                 },
                 {
                     "command": "baywatch.reviewLinkedBundle",
                     "when": "view == baywatch.issueQueue && viewItem == issue-implemented",
+                    "group": "inline@1"
+                },
+                {
+                    "command": "baywatch.queueReviewPr",
+                    "when": "view == baywatch.prQueue",
+                    "group": "inline@1"
+                },
+                {
+                    "command": "baywatch.queueIssueAction",
+                    "when": "view == baywatch.issueQueue && viewItem == issue-open",
                     "group": "1_action"
+                },
+                {
+                    "command": "baywatch.reviewLinkedBundle",
+                    "when": "view == baywatch.issueQueue && viewItem == issue-implemented",
+                    "group": "1_action"
+                },
+                {
+                    "command": "baywatch.queueReviewPr",
+                    "when": "view == baywatch.prQueue",
+                    "group": "1_action"
+                },
+                {
+                    "command": "baywatch.openIssueOnGithub",
+                    "when": "view == baywatch.issueQueue",
+                    "group": "9_open"
+                },
+                {
+                    "command": "baywatch.openPrOnGithub",
+                    "when": "view == baywatch.prQueue",
+                    "group": "9_open"
                 },
                 {
                     "command": "baywatch.tailLog",
@@ -271,6 +313,14 @@
                 },
                 {
                     "command": "baywatch.reviewLinkedBundle",
+                    "when": "false"
+                },
+                {
+                    "command": "baywatch.openIssueOnGithub",
+                    "when": "false"
+                },
+                {
+                    "command": "baywatch.openPrOnGithub",
                     "when": "false"
                 }
             ]

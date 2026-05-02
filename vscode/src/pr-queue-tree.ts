@@ -31,13 +31,15 @@ export class PrQueueTreeDataProvider implements vscode.TreeDataProvider<PrRef> {
                       (pr.lastReviewedHead ? `  (head \`${pr.lastReviewedHead.slice(0, 7)}\`)` : "")
                     : "never reviewed",
                 `current head: \`${pr.headRefOid.slice(0, 7)}\``,
+                "_(click → open PR on GitHub  ·  use the action button to run review)_",
             ].join("\n\n")
         )
         item.iconPath = stateIcon(pr.reviewState)
         item.contextValue = `pr-${pr.reviewState}`
+        // Click opens the PR in the browser; the action button runs the review agent.
         item.command = {
-            command: "baywatch.queueReviewPr",
-            title: "Review this PR",
+            command: "baywatch.openPrOnGithub",
+            title: "Open PR on GitHub",
             arguments: [pr],
         }
         return item

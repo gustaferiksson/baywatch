@@ -1,4 +1,5 @@
-import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process"
+import { type ChildProcess, spawn } from "node:child_process"
+import { existsSync } from "node:fs"
 import * as vscode from "vscode"
 
 import type { RunEntry } from "./types.js"
@@ -8,7 +9,7 @@ import type { RunEntry } from "./types.js"
 // focused on what the maintainer's actually looking at.
 
 let channel: vscode.OutputChannel | null = null
-let activeTail: ChildProcessWithoutNullStreams | null = null
+let activeTail: ChildProcess | null = null
 let activeRunId: number | null = null
 
 function ensureChannel(): vscode.OutputChannel {
@@ -17,6 +18,7 @@ function ensureChannel(): vscode.OutputChannel {
 }
 
 export function tailRun(run: RunEntry): void {
+    console.log(`[baywatch] tailRun #${run.runId} logPath=${run.logPath ?? "(none)"}`)
     if (!run.logPath) {
         void vscode.window.showInformationMessage("This run has no log file yet.")
         return
@@ -30,13 +32,28 @@ export function tailRun(run: RunEntry): void {
     ch.appendLine("")
     ch.show(true)
 
+    if (!existsSync(run.logPath)) {
+        ch.appendLine(`(log file not on disk yet — run may still be starting up)`)
+        ch.appendLine(`(retrying in 2s…)`)
+        setTimeout(() => tailRun(run), 2000)
+        return
+    }
+
     const child = spawn("tail", ["-n", "+1", "-f", run.logPath])
     activeTail = child
     activeRunId = run.runId
 
-    child.stdout.on("data", (chunk: Buffer) => ch.append(chunk.toString()))
-    child.stderr.on("data", (chunk: Buffer) => ch.append(chunk.toString()))
-    child.on("close", () => {
+    child.stdout?.on("data", (chunk: Buffer) => ch.append(chunk.toString()))
+    child.stderr?.on("data", (chunk: Buffer) => ch.append(chunk.toString()))
+    child.on("error", (err) => {
+        ch.appendLine(`\n[baywatch] tail error: ${err.message}`)
+        if (activeTail === child) {
+            activeTail = null
+            activeRunId = null
+        }
+    })
+    child.on("close", (code) => {
+        if (code !== 0 && code !== null) ch.appendLine(`\n[baywatch] tail exited (code ${code})`)
         if (activeTail === child) {
             activeTail = null
             activeRunId = null

@@ -25,10 +25,6 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
         console.log(`[review] ${ownerRepo}#${pr.number} — already reviewed at ${pr.headRefOid.slice(0, 7)}, skipping`)
         return
     }
-    if (!pr.repoPath) {
-        console.error(`[review] no local clone for ${ownerRepo}; skipping PR #${pr.number}`)
-        return
-    }
 
     if (!existsSync(REVIEWS_HOST_DIR)) mkdirSync(REVIEWS_HOST_DIR, { recursive: true })
 
@@ -85,7 +81,10 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
                     { hostPath: SETTINGS_HOST_PATH, sandboxPath: SETTINGS_SANDBOX_PATH, readonly: true },
                 ],
             }),
-            cwd: pr.repoPath,
+            // Review reads the diff from the prompt — no need for the agent to be on the
+            // PR's branch (or any specific branch). Use BAYWATCH_ROOT so reviews don't
+            // depend on whatever the user has checked out in their main clone.
+            cwd: BAYWATCH_ROOT,
             promptFile: PROMPT_PATH,
             promptArgs: {
                 PR_REPO: ownerRepo,
@@ -102,7 +101,7 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
                 ADDITIONAL_NOTES: readNote(`${ownerRepo}#${pr.number}`) ?? "(none — review from the diff alone)",
             },
             branchStrategy: { type: "head" },
-            name: `review-${pr.number}`,
+            name: `review-${ownerRepo.replace("/", "-")}-${pr.number}`,
         })
 
         console.log(`[review]   done: ${result.iterations.length} iteration(s)`)

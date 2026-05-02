@@ -1,6 +1,6 @@
 import type { BaywatchConfig } from "./config.ts"
 import {
-    findLinkedOpenPRs,
+    findActivelyLinkedOpenPRs,
     getIssue,
     getPR,
     type Issue,
@@ -69,15 +69,20 @@ export async function discoverIssues(config: BaywatchConfig, extraRefs: string[]
         else console.warn(`[discovery] failed to fetch ${ref.ownerRepo}#${ref.num}: ${r.reason}`)
     }
 
-    // Concurrent linked-PR check per issue. Empty array means nothing blocking.
+    // Concurrent linked-PR check per issue. Uses the GraphQL `closedByPullRequestsReferences`
+    // field — same data the GitHub Development panel renders — so PRs the user actively
+    // linked via the UI (without "closes #N" body keywords) are picked up. Empty array
+    // means nothing linked.
     const linked = await Promise.all(
         collected.map((i) =>
-            findLinkedOpenPRs(i.repository.nameWithOwner, i.number).catch((err: unknown) => {
-                console.warn(
-                    `[discovery] linked-PR lookup failed for ${i.repository.nameWithOwner}#${i.number}: ${(err as Error).message}`
-                )
-                return [] as LinkedPR[]
-            })
+            findActivelyLinkedOpenPRs(i.repository.nameWithOwner, i.number)
+                .then((prs): LinkedPR[] => prs.map((pr) => ({ number: pr.number, title: pr.title, url: pr.url })))
+                .catch((err: unknown) => {
+                    console.warn(
+                        `[discovery] linked-PR lookup failed for ${i.repository.nameWithOwner}#${i.number}: ${(err as Error).message}`
+                    )
+                    return [] as LinkedPR[]
+                })
         )
     )
     return collected.map((issue, idx) => ({

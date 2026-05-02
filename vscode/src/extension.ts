@@ -16,7 +16,7 @@ import { updateStatusBar } from "./status-bar.js"
 import type { IssueRef, PrRef, RunEntry } from "./types.js"
 
 // Bumped on every meaningful change so F5/reinstall is verifiable from the activate toast.
-const VERSION_BANNER = "v0.0.6"
+const VERSION_BANNER = "v0.0.8"
 
 export function activate(context: vscode.ExtensionContext): void {
     console.log(`[baywatch] extension activate ${VERSION_BANNER}`)
@@ -113,6 +113,12 @@ export function activate(context: vscode.ExtensionContext): void {
                 reviewLinkedBundleCommand(issue, runsProvider, () => void refreshAll())
             )
         ),
+        vscode.commands.registerCommand("baywatch.openIssueOnGithub", (issue?: IssueRef) => {
+            if (issue?.url) openInVscode(issue.url)
+        }),
+        vscode.commands.registerCommand("baywatch.openPrOnGithub", (pr?: PrRef) => {
+            if (pr?.url) openInVscode(pr.url)
+        }),
         vscode.commands.registerCommand("baywatch.tailLog", (run?: RunEntry) => {
             if (run) tailRun(run)
         }),
@@ -170,6 +176,13 @@ function runInTerminal(name: string, command: string): vscode.Terminal {
     term.show(true)
     term.sendText(command)
     return term
+}
+
+// Open a URL inside VS Code's Simple Browser tab instead of the OS browser, so the
+// user's editor stays the focused surface. The Simple Browser is built-in to VS Code
+// (no extension needed).
+function openInVscode(url: string): void {
+    void vscode.commands.executeCommand("simpleBrowser.show", url)
 }
 
 // Burst-refresh schedule used right after dispatching a run so the new registry entry
