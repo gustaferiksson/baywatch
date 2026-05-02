@@ -26,6 +26,24 @@ These are free-form notes the maintainer left for this review. Treat them as **h
 - **Never** post a review to GitHub. Never run `gh pr review`, `gh pr comment`, or any GitHub write command.
 - Your output is a markdown file written to `{{REVIEW_OUTPUT_PATH}}`. The maintainer reads it and submits the review themselves.
 
+## Severity scale
+
+Tag every individual finding in passes 2–5 with one of three severities. The verdict at the end maps directly from these.
+
+- **`[critical]`** — must fix before merge. Correctness bug that affects users, data loss, security issue, breaks production code paths, or violates a hard rule (silent failure, swallowed error in a critical path, missing auth check).
+- **`[high]`** — strongly recommend fixing before merge. A real flaw the maintainer should weigh: bug in a non-critical path, type-design problem that hurts maintainability, missing test for the new behaviour, visibility violation that will trip a future reader.
+- **`[low]`** — nit / nice-to-have. Style, minor cleanup, optional improvement, naming, comment hygiene. Skip the finding entirely if it's lower than this.
+
+Format each finding as a bullet beginning with the tag:
+
+```
+- [critical] file/path.ts:42 — short description
+- [high] file/path.ts:18 — short description
+- [low] file/path.ts:9 — short description
+```
+
+If a section produced no findings worth recording, write a single line `_no findings._` rather than padding with low-value notes.
+
 ## Workflow
 
 Run these passes in order. Each lands a section in the output markdown.
@@ -66,7 +84,14 @@ Now line-level. Bugs, off-by-ones, race conditions, silent error swallowing, tes
 
 ### 6. Verdict
 
-Pick one: approve as-is / approve with minor suggestions / needs changes / blocking.
+Map directly from the severity counts in passes 2–5:
+
+- Any `[critical]` finding → **Blocking**
+- Any `[high]` finding (no `[critical]`) → **Needs changes**
+- Only `[low]` findings → **Approve with minor suggestions**
+- No findings at all → **Approve as-is**
+
+Don't soften this — let the severities do the work. If you wrote `[critical]` somewhere, you must check the **Blocking** box.
 
 ## Output
 
@@ -83,19 +108,19 @@ Write the review to `{{REVIEW_OUTPUT_PATH}}` with this structure:
 
 ## Goal vs. implementation
 
-…
+- [severity] short note (or _no findings._)
 
 ## Type design
 
-…
+- [severity] file:line — short note (or _no findings._)
 
 ## Visibility
 
-…
+- [severity] file:line — short note (or _no findings._)
 
 ## Code-level notes
 
-…
+- [severity] file:line — short note (or _no findings._)
 
 ## Verdict
 
@@ -103,6 +128,8 @@ Write the review to `{{REVIEW_OUTPUT_PATH}}` with this structure:
 - [ ] Approve with minor suggestions
 - [ ] Needs changes
 - [ ] Blocking — one-line reason
+
+**Severity counts:** _N critical, M high, K low._
 ```
 
 Also write `{{SUBMIT_SCRIPT_PATH}}` — a shell script the maintainer runs themselves. Default to commented out; the maintainer uncomments after reading:
