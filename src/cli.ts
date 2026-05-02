@@ -187,14 +187,15 @@ const listPRs = async (refs: string[], json: boolean): Promise<void> => {
                 lastReviewedHead: pr.lastReviewedHead,
                 lastReviewPath: last?.reviewPath ?? null,
                 verdictAtCurrentHead: pr.verdictAtCurrentHead,
-            // Discriminator for UI rendering. Maps to the review verdict at the current head
-            // when one exists, with stale/unreviewed as fallbacks. Color guidance for callers:
-            //   approve / approve-minor   → green
-            //   needs-changes / stale     → yellow
-            //   blocking / unreviewed     → red
-            reviewState: deriveReviewState(pr),
-        }))
-        process.stdout.write(`$JSON.stringify(out, null, 2)\n`)
+                // Discriminator for UI rendering. Maps to the review verdict at the current head
+                // when one exists, with stale/unreviewed as fallbacks. Color guidance for callers:
+                //   approve / approve-minor   → green
+                //   needs-changes / stale     → yellow
+                //   blocking / unreviewed     → red
+                reviewState: deriveReviewState(pr),
+            }
+        })
+        process.stdout.write(`${JSON.stringify(out, null, 2)}\n`)
         return
     }
     if (prs.length === 0) {
