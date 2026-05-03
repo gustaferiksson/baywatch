@@ -16,7 +16,7 @@ import { updateStatusBar } from "./status-bar.js"
 import type { IssueRef, PrRef, RunEntry } from "./types.js"
 
 // Bumped on every meaningful change so F5/reinstall is verifiable from the activate toast.
-const VERSION_BANNER = "v0.0.11"
+const VERSION_BANNER = "v0.0.12"
 
 export function activate(context: vscode.ExtensionContext): void {
     console.log(`[baywatch] extension activate ${VERSION_BANNER}`)
@@ -165,10 +165,30 @@ export function activate(context: vscode.ExtensionContext): void {
         })
     )
 
-    // Initial draw + auto-refresh every 10s.
+    // Initial draw + adaptive auto-refresh: 10s when an agent run is in-flight, 30s
+    // when everything's idle. Avoids hammering the CLI when there's nothing to see.
     void refreshAll()
-    const interval = setInterval(() => void refreshAll(), 10_000)
-    context.subscriptions.push({ dispose: () => clearInterval(interval) })
+    let pollTimer: ReturnType<typeof setTimeout> | null = null
+    const scheduleNextPoll = async (): Promise<void> => {
+        let nextMs = 30_000
+        try {
+            const { listRuns } = await import("./cli.js")
+            const running = await listRuns({ running: true, limit: 5 })
+            if (running.length > 0) nextMs = 10_000
+        } catch {
+            // CLI failure shouldn't break the polling loop — fall back to slow interval.
+        }
+        pollTimer = setTimeout(async () => {
+            await refreshAll()
+            void scheduleNextPoll()
+        }, nextMs)
+    }
+    void scheduleNextPoll()
+    context.subscriptions.push({
+        dispose: () => {
+            if (pollTimer) clearTimeout(pollTimer)
+        },
+    })
 
     // First-activation doctor pass: nudges users about setup gaps without being noisy on every refresh.
     void doctorOnActivate()
