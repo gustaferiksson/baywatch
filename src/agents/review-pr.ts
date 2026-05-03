@@ -5,6 +5,7 @@ import { podman } from "@ai-hero/sandcastle/sandboxes/podman"
 
 import { createReviewClone } from "../agentClone.ts"
 import { loadAgentEnv } from "../agentEnv.ts"
+import { defaultAgentMounts } from "../agentMounts.ts"
 import { BAYWATCH_ROOT, type BaywatchConfig } from "../config.ts"
 import type { DiscoveredPR } from "../discovery.ts"
 import { hostGhEnv } from "../gh.ts"
@@ -17,8 +18,6 @@ const SANDBOX_IMAGE = "baywatch-agent"
 const PROMPT_PATH = path.join(BAYWATCH_ROOT, "prompts", "review-pr.md")
 const REVIEWS_HOST_DIR = path.join(BAYWATCH_ROOT, "reviews")
 const REVIEWS_SANDBOX_DIR = "/baywatch-reviews"
-const SETTINGS_HOST_PATH = path.join(BAYWATCH_ROOT, ".claude", "settings.json")
-const SETTINGS_SANDBOX_PATH = "/home/agent/.claude/settings.json"
 
 export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig; dryRun: boolean }): Promise<void> {
     const { pr, config, dryRun } = opts
@@ -87,10 +86,7 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
                 imageName: SANDBOX_IMAGE,
                 selinuxLabel: false,
                 env: loadAgentEnv(),
-                mounts: [
-                    { hostPath: REVIEWS_HOST_DIR, sandboxPath: REVIEWS_SANDBOX_DIR },
-                    { hostPath: SETTINGS_HOST_PATH, sandboxPath: SETTINGS_SANDBOX_PATH, readonly: true },
-                ],
+                mounts: [{ hostPath: REVIEWS_HOST_DIR, sandboxPath: REVIEWS_SANDBOX_DIR }, ...defaultAgentMounts()],
             }),
             cwd: clone.path,
             ...(hooks ? { hooks } : {}),

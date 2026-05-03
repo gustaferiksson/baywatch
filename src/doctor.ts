@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs"
+import { homedir } from "node:os"
 import path from "node:path"
 import { $ } from "bun"
 
@@ -82,7 +83,7 @@ function checkEnvTokens(): CheckResult {
             name: "Claude credentials in env",
             status: "fail",
             detail: "neither CLAUDE_CODE_OAUTH_TOKEN nor ANTHROPIC_API_KEY set",
-            hint: "run `claude setup-token` and put it in baywatch/.env",
+            hint: "run `claude setup-token` and put it in baywatch/.env (or just use `claude auth login` — see next check)",
         }
     }
     const claudeNote = oauth ? "CLAUDE_CODE_OAUTH_TOKEN set" : "ANTHROPIC_API_KEY set"
@@ -95,6 +96,19 @@ function checkEnvTokens(): CheckResult {
         }
     }
     return { name: "Claude credentials in env", status: "ok", detail: `${claudeNote}; GITHUB_TOKEN set` }
+}
+
+function checkClaudeAuthJson(): CheckResult {
+    const auth = path.join(homedir(), ".claude", "auth.json")
+    if (!existsSync(auth)) {
+        return {
+            name: "Remote Control auth (~/.claude/auth.json)",
+            status: "warn",
+            detail: "missing — sandboxed agents will not appear at claude.ai/code",
+            hint: "run `claude auth login` once on the host so the OAuth session lands in ~/.claude/auth.json; baywatch then mounts it into every sandbox",
+        }
+    }
+    return { name: "Remote Control auth (~/.claude/auth.json)", status: "ok", detail: auth }
 }
 
 function checkConfig(): CheckResult {
@@ -116,6 +130,7 @@ export async function runDoctor(): Promise<{ checks: CheckResult[]; ok: boolean 
         checkPodmanMachine(),
         checkImage(),
         Promise.resolve(checkEnvTokens()),
+        Promise.resolve(checkClaudeAuthJson()),
         Promise.resolve(checkConfig()),
     ])
     const ok = checks.every((c) => c.status !== "fail")

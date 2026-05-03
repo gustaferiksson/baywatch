@@ -5,14 +5,12 @@ import { podman } from "@ai-hero/sandcastle/sandboxes/podman"
 
 import { createAgentClone, pushBranchToMain } from "../agentClone.ts"
 import { loadAgentEnv } from "../agentEnv.ts"
+import { defaultAgentMounts } from "../agentMounts.ts"
 import { BAYWATCH_ROOT, type BaywatchConfig } from "../config.ts"
 import type { DiscoveredIssue } from "../discovery.ts"
 import { readNote } from "../notes.ts"
 import { prepRepo } from "../prep.ts"
 import { completeRun, startRun } from "../state.ts"
-
-const SETTINGS_HOST_PATH = path.join(BAYWATCH_ROOT, ".claude", "settings.json")
-const SETTINGS_SANDBOX_PATH = "/home/agent/.claude/settings.json"
 
 const SANDBOX_IMAGE = "baywatch-agent"
 const PROMPT_PATH = path.join(BAYWATCH_ROOT, "prompts", "solve-issue.md")
@@ -80,7 +78,7 @@ export async function solveIssue(opts: {
                 imageName: SANDBOX_IMAGE,
                 selinuxLabel: false,
                 env: loadAgentEnv(),
-                mounts: [{ hostPath: SETTINGS_HOST_PATH, sandboxPath: SETTINGS_SANDBOX_PATH, readonly: true }],
+                mounts: defaultAgentMounts(),
             }),
             cwd: clone.path,
             promptFile: PROMPT_PATH,

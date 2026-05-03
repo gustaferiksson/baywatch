@@ -4,6 +4,7 @@ import { claudeCode, run } from "@ai-hero/sandcastle"
 import { podman } from "@ai-hero/sandcastle/sandboxes/podman"
 
 import { loadAgentEnv } from "../agentEnv.ts"
+import { defaultAgentMounts } from "../agentMounts.ts"
 import { BAYWATCH_ROOT, type BaywatchConfig } from "../config.ts"
 import { findActivelyLinkedOpenPRs, getPR, type PR } from "../gh.ts"
 import { parseVerdict } from "../reviewVerdict.ts"
@@ -13,8 +14,6 @@ const SANDBOX_IMAGE = "baywatch-agent"
 const PROMPT_PATH = path.join(BAYWATCH_ROOT, "prompts", "review-bundle.md")
 const REVIEWS_HOST_DIR = path.join(BAYWATCH_ROOT, "reviews")
 const REVIEWS_SANDBOX_DIR = "/baywatch-reviews"
-const SETTINGS_HOST_PATH = path.join(BAYWATCH_ROOT, ".claude", "settings.json")
-const SETTINGS_SANDBOX_PATH = "/home/agent/.claude/settings.json"
 
 // Pre-fetch a PR's diff on the host so we can inline it into the bundle prompt without
 // the sandbox needing gh credentials. Same pattern as the single-PR review flow.
@@ -141,10 +140,7 @@ export async function reviewBundle(opts: {
                 imageName: SANDBOX_IMAGE,
                 selinuxLabel: false,
                 env: loadAgentEnv(),
-                mounts: [
-                    { hostPath: REVIEWS_HOST_DIR, sandboxPath: REVIEWS_SANDBOX_DIR },
-                    { hostPath: SETTINGS_HOST_PATH, sandboxPath: SETTINGS_SANDBOX_PATH, readonly: true },
-                ],
+                mounts: [{ hostPath: REVIEWS_HOST_DIR, sandboxPath: REVIEWS_SANDBOX_DIR }, ...defaultAgentMounts()],
             }),
             // We don't checkout any PR's branch — the agent works from the inlined diffs in the prompt.
             // Use the first PR's repo as cwd just so sandcastle has a valid git workspace to point at.
