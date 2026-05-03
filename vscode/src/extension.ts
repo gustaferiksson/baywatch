@@ -16,7 +16,7 @@ import { updateStatusBar } from "./status-bar.js"
 import type { IssueRef, PrRef, RunEntry } from "./types.js"
 
 // Bumped on every meaningful change so F5/reinstall is verifiable from the activate toast.
-const VERSION_BANNER = "v0.0.10"
+const VERSION_BANNER = "v0.0.11"
 
 export function activate(context: vscode.ExtensionContext): void {
     console.log(`[baywatch] extension activate ${VERSION_BANNER}`)
