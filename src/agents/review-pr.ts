@@ -70,6 +70,8 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
 
     const hooks = prep.installCmd ? { sandbox: { onSandboxReady: [{ command: prep.installCmd }] } } : undefined
 
+    const sandboxMounts = await defaultAgentMounts()
+
     const runId = startRun({
         kind: "review",
         ownerRepo,
@@ -86,7 +88,7 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
                 imageName: SANDBOX_IMAGE,
                 selinuxLabel: false,
                 env: loadAgentEnv(),
-                mounts: [{ hostPath: REVIEWS_HOST_DIR, sandboxPath: REVIEWS_SANDBOX_DIR }, ...defaultAgentMounts()],
+                mounts: [{ hostPath: REVIEWS_HOST_DIR, sandboxPath: REVIEWS_SANDBOX_DIR }, ...sandboxMounts.mounts],
             }),
             cwd: clone.path,
             ...(hooks ? { hooks } : {}),
@@ -135,5 +137,7 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
     } catch (err) {
         completeRun(runId, { status: "failed", errorSummary: (err as Error).message })
         throw err
+    } finally {
+        await sandboxMounts.cleanup()
     }
 }

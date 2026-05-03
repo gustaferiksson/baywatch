@@ -126,6 +126,7 @@ export async function reviewBundle(opts: {
     const target = opts.forIssue
         ? `bundle-${opts.forIssue.replace(/[/]/g, "_")}`
         : `bundle-${prs.length}prs-${Date.now()}`
+    const sandboxMounts = await defaultAgentMounts()
     const runId = startRun({
         kind: "review",
         ownerRepo: cwdRepo,
@@ -140,7 +141,7 @@ export async function reviewBundle(opts: {
                 imageName: SANDBOX_IMAGE,
                 selinuxLabel: false,
                 env: loadAgentEnv(),
-                mounts: [{ hostPath: REVIEWS_HOST_DIR, sandboxPath: REVIEWS_SANDBOX_DIR }, ...defaultAgentMounts()],
+                mounts: [{ hostPath: REVIEWS_HOST_DIR, sandboxPath: REVIEWS_SANDBOX_DIR }, ...sandboxMounts.mounts],
             }),
             // We don't checkout any PR's branch — the agent works from the inlined diffs in the prompt.
             // Use the first PR's repo as cwd just so sandcastle has a valid git workspace to point at.
@@ -188,5 +189,7 @@ export async function reviewBundle(opts: {
     } catch (err) {
         completeRun(runId, { status: "failed", errorSummary: (err as Error).message })
         throw err
+    } finally {
+        await sandboxMounts.cleanup()
     }
 }

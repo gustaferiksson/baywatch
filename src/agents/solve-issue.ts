@@ -63,6 +63,8 @@ export async function solveIssue(opts: {
 
     const hooks = prep.installCmd ? { sandbox: { onSandboxReady: [{ command: prep.installCmd }] } } : undefined
 
+    const sandboxMounts = await defaultAgentMounts()
+
     const runId = startRun({
         kind: "dev",
         ownerRepo,
@@ -78,7 +80,7 @@ export async function solveIssue(opts: {
                 imageName: SANDBOX_IMAGE,
                 selinuxLabel: false,
                 env: loadAgentEnv(),
-                mounts: defaultAgentMounts(),
+                mounts: sandboxMounts.mounts,
             }),
             cwd: clone.path,
             promptFile: PROMPT_PATH,
@@ -121,6 +123,8 @@ export async function solveIssue(opts: {
     } catch (err) {
         completeRun(runId, { status: "failed", errorSummary: (err as Error).message })
         throw err
+    } finally {
+        await sandboxMounts.cleanup()
     }
 }
 

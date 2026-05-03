@@ -98,14 +98,27 @@ function checkEnvTokens(): CheckResult {
     return { name: "Claude credentials in env", status: "ok", detail: `${claudeNote}; GITHUB_TOKEN set` }
 }
 
-function checkClaudeAuthJson(): CheckResult {
+async function checkClaudeAuth(): Promise<CheckResult> {
+    if (process.platform === "darwin") {
+        // macOS stores Claude Code credentials in the Keychain, not a file.
+        const out = await $`security find-generic-password -s "Claude Code-credentials" 2>/dev/null`.nothrow().quiet()
+        if (out.exitCode !== 0) {
+            return {
+                name: "Remote Control auth (Keychain)",
+                status: "warn",
+                detail: "no `Claude Code-credentials` entry in macOS Keychain — sandboxed agents will not appear at claude.ai/code",
+                hint: "run `claude auth login` once on the host; baywatch extracts the credential at runtime and mounts it into the sandbox",
+            }
+        }
+        return { name: "Remote Control auth (Keychain)", status: "ok", detail: "Claude Code-credentials present" }
+    }
     const auth = path.join(homedir(), ".claude", "auth.json")
     if (!existsSync(auth)) {
         return {
             name: "Remote Control auth (~/.claude/auth.json)",
             status: "warn",
             detail: "missing — sandboxed agents will not appear at claude.ai/code",
-            hint: "run `claude auth login` once on the host so the OAuth session lands in ~/.claude/auth.json; baywatch then mounts it into every sandbox",
+            hint: "run `claude auth login` once on the host",
         }
     }
     return { name: "Remote Control auth (~/.claude/auth.json)", status: "ok", detail: auth }
@@ -130,7 +143,7 @@ export async function runDoctor(): Promise<{ checks: CheckResult[]; ok: boolean 
         checkPodmanMachine(),
         checkImage(),
         Promise.resolve(checkEnvTokens()),
-        Promise.resolve(checkClaudeAuthJson()),
+        checkClaudeAuth(),
         Promise.resolve(checkConfig()),
     ])
     const ok = checks.every((c) => c.status !== "fail")
