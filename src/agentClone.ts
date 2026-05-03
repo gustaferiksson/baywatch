@@ -57,9 +57,11 @@ export async function pushBranchToMain(clone: AgentClone): Promise<void> {
     await $`git -C ${clone.mainClonePath} fetch ${clone.path} ${clone.branch}:${clone.branch}`.quiet()
 }
 
-// Clone the user's main checkout and check out the PR's head branch in the new clone
-// via `gh pr checkout` (handles same-repo + fork PRs). The agent reviews the PR with
-// real working files available, while the user's main clone stays untouched.
+// Clone the repo from GitHub (so `gh` tooling has a real github.com remote to work
+// with) and check out the PR's head branch via `gh pr checkout`. Uses
+// `git clone --reference <main>` under the hood so we share object storage with the
+// user's main clone and avoid re-downloading megabytes of history. The user's main
+// clone stays untouched.
 export async function createReviewClone(opts: {
     ownerRepo: string
     mainClonePath: string
@@ -71,18 +73,23 @@ export async function createReviewClone(opts: {
     const dirname = `review-${flat(ownerRepo)}--${prNumber}--${shortId()}`
     const clonePath = path.join(CLONES_ROOT, dirname)
 
-    console.log(`[review-clone] cloning ${mainClonePath} → ${clonePath}`)
-    await $`git clone ${mainClonePath} ${clonePath}`.quiet()
+    console.log(`[review-clone] gh repo clone ${ownerRepo} → ${clonePath} (reference: ${mainClonePath})`)
+    const cloneProc = Bun.spawn(
+        ["gh", "repo", "clone", ownerRepo, clonePath, "--", "--reference", mainClonePath, "--dissociate"],
+        { env: hostGhEnv(), stdout: "inherit", stderr: "inherit" }
+    )
+    const cloneCode = await cloneProc.exited
+    if (cloneCode !== 0) throw new Error(`gh repo clone ${ownerRepo} failed (exit ${cloneCode})`)
 
     console.log(`[review-clone] gh pr checkout ${ownerRepo}#${prNumber}`)
-    const proc = Bun.spawn(["gh", "pr", "checkout", String(prNumber), "--repo", ownerRepo], {
+    const checkoutProc = Bun.spawn(["gh", "pr", "checkout", String(prNumber), "--repo", ownerRepo], {
         cwd: clonePath,
         env: hostGhEnv(),
         stdout: "inherit",
         stderr: "inherit",
     })
-    const code = await proc.exited
-    if (code !== 0) throw new Error(`gh pr checkout ${ownerRepo}#${prNumber} failed (exit ${code})`)
+    const checkoutCode = await checkoutProc.exited
+    if (checkoutCode !== 0) throw new Error(`gh pr checkout ${ownerRepo}#${prNumber} failed (exit ${checkoutCode})`)
 
     const branch = (await $`git -C ${clonePath} rev-parse --abbrev-ref HEAD`.text()).trim()
     return { path: clonePath, mainClonePath, branch }
