@@ -2,7 +2,7 @@
     "name": "baywatch-vscode",
     "displayName": "Baywatch",
     "description": "VS Code surface for the baywatch agent orchestrator. Talks to the `baywatch` CLI; CLI is the source of truth.",
-    "version": "0.0.12",
+    "version": "0.0.13",
     "publisher": "gustaferiksson",
     "private": false,
     "license": "MIT",
@@ -162,6 +162,11 @@
                 "command": "baywatch.openInExternalBrowser",
                 "title": "Baywatch: Open in browser",
                 "icon": "$(globe)"
+            },
+            {
+                "command": "baywatch.followLive",
+                "title": "Baywatch: Follow live (claude.ai/code)",
+                "icon": "$(broadcast)"
             }
         ],
         "menus": {
@@ -239,6 +244,11 @@
                     "group": "9_open"
                 },
                 {
+                    "command": "baywatch.followLive",
+                    "when": "view == baywatch.runs && viewItem =~ /-running$/",
+                    "group": "inline@0"
+                },
+                {
                     "command": "baywatch.tailLog",
                     "when": "view == baywatch.runs",
                     "group": "inline@1"
@@ -249,13 +259,18 @@
                     "group": "1_view"
                 },
                 {
+                    "command": "baywatch.followLive",
+                    "when": "view == baywatch.runs && viewItem =~ /-running$/",
+                    "group": "1_view"
+                },
+                {
                     "command": "baywatch.openClone",
                     "when": "view == baywatch.runs && viewItem == dev-run",
                     "group": "inline@2"
                 },
                 {
                     "command": "baywatch.openReview",
-                    "when": "view == baywatch.runs && viewItem == review-run",
+                    "when": "view == baywatch.runs && viewItem =~ /^review-run/",
                     "group": "inline@2"
                 },
                 {
@@ -270,12 +285,12 @@
                 },
                 {
                     "command": "baywatch.openClone",
-                    "when": "view == baywatch.runs && viewItem == dev-run",
+                    "when": "view == baywatch.runs && viewItem =~ /^dev-run/",
                     "group": "1_view"
                 },
                 {
                     "command": "baywatch.openReview",
-                    "when": "view == baywatch.runs && viewItem == review-run",
+                    "when": "view == baywatch.runs && viewItem =~ /^review-run/",
                     "group": "1_view"
                 },
                 {
@@ -285,12 +300,12 @@
                 },
                 {
                     "command": "baywatch.pushBranch",
-                    "when": "view == baywatch.runs && viewItem == dev-run",
+                    "when": "view == baywatch.runs && viewItem =~ /^dev-run/",
                     "group": "2_action"
                 },
                 {
                     "command": "baywatch.openPR",
-                    "when": "view == baywatch.runs && viewItem == dev-run",
+                    "when": "view == baywatch.runs && viewItem =~ /^dev-run/",
                     "group": "2_action"
                 }
             ],

@@ -16,7 +16,7 @@ import { updateStatusBar } from "./status-bar.js"
 import type { IssueRef, PrRef, RunEntry } from "./types.js"
 
 // Bumped on every meaningful change so F5/reinstall is verifiable from the activate toast.
-const VERSION_BANNER = "v0.0.12"
+const VERSION_BANNER = "v0.0.13"
 
 export function activate(context: vscode.ExtensionContext): void {
     console.log(`[baywatch] extension activate ${VERSION_BANNER}`)
@@ -121,6 +121,12 @@ export function activate(context: vscode.ExtensionContext): void {
         }),
         vscode.commands.registerCommand("baywatch.openInExternalBrowser", async (item?: { url?: string }) => {
             if (item?.url) await vscode.env.openExternal(vscode.Uri.parse(item.url))
+        }),
+        vscode.commands.registerCommand("baywatch.followLive", async () => {
+            // claude.ai/code lists every active remote-controlled session — including the
+            // ones our sandbox spawns since they boot with remoteControlAtStartup: true.
+            // Find the one named `issue-<n>` / `review-<n>` (or whatever the run.name is).
+            await vscode.env.openExternal(vscode.Uri.parse("https://claude.ai/code"))
         }),
         vscode.commands.registerCommand("baywatch.tailLog", (run?: RunEntry) => {
             if (run) tailRun(run)

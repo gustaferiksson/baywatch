@@ -30,7 +30,9 @@ export class RunsTreeDataProvider implements vscode.TreeDataProvider<RunEntry> {
                 .join("\n\n")
         )
         item.iconPath = new vscode.ThemeIcon(statusIcon(run.status), statusColor(run.status))
-        item.contextValue = run.kind === "dev" ? "dev-run" : "review-run"
+        // Encode status into contextValue so menus can target running runs specifically
+        // (e.g. inline "follow live" button only on in-flight rows).
+        item.contextValue = `${run.kind}-run${run.status === "running" ? "-running" : ""}`
         if (run.logPath) {
             // Click opens the log as a regular editor tab. Use the inline tail button
             // (right-side) for live streaming into the output channel.
