@@ -16,7 +16,7 @@ import { updateStatusBar } from "./status-bar.js"
 import type { IssueRef, PrRef, RunEntry } from "./types.js"
 
 // Bumped on every meaningful change so F5/reinstall is verifiable from the activate toast.
-const VERSION_BANNER = "v0.0.13"
+const VERSION_BANNER = "v0.0.14"
 
 export function activate(context: vscode.ExtensionContext): void {
     console.log(`[baywatch] extension activate ${VERSION_BANNER}`)
@@ -37,13 +37,12 @@ export function activate(context: vscode.ExtensionContext): void {
     // Track which runs we've already auto-surfaced as failed, so we don't keep re-popping the channel.
     const surfacedFailures = new Set<number>()
 
-    const refreshAll = async (): Promise<void> => {
+    // Cheap refresh — runs (local SQLite) + reviews (local filesystem) + status bar.
+    // Hits no gh API; safe to poll at high frequency.
+    const refreshLocalOnly = async (): Promise<void> => {
         runsProvider.refresh()
-        issueQueueProvider.refresh()
-        prQueueProvider.refresh()
         reviewsProvider.refresh()
         await updateStatusBar(context)
-        // Auto-show the log channel for runs that just flipped to failed.
         try {
             const { listRuns } = await import("./cli.js")
             const recent = await listRuns({ limit: 10 })
@@ -63,6 +62,16 @@ export function activate(context: vscode.ExtensionContext): void {
         } catch {
             // refresh shouldn't error-out the extension; the tree's own error toast handles it.
         }
+    }
+
+    // Full refresh — also hits issue/PR queues which run `baywatch list issues|prs --json`,
+    // which in turn hit gh's API (assigned issues, review-requested PRs, GraphQL linked-PR
+    // lookups per issue). Reserved for explicit user action and post-dispatch burst — never
+    // on the auto-poll timer, since rate limits add up fast.
+    const refreshAll = async (): Promise<void> => {
+        issueQueueProvider.refresh()
+        prQueueProvider.refresh()
+        await refreshLocalOnly()
     }
 
     // Wrap any registered handler so an unhandled rejection surfaces as an error toast
@@ -171,8 +180,12 @@ export function activate(context: vscode.ExtensionContext): void {
         })
     )
 
-    // Initial draw + adaptive auto-refresh: 10s when an agent run is in-flight, 30s
-    // when everything's idle. Avoids hammering the CLI when there's nothing to see.
+    // Initial draw: full refresh once on activate. After that, the auto-poll only refreshes
+    // local trees (runs, reviews) — issue + PR queues are gh-API-backed and getting refreshed
+    // on every tick maxed out the rate limit. Queues now refresh on user action only:
+    //   - clicking the status bar / running `Baywatch: Refresh`
+    //   - dispatching a run (burst refresh)
+    //   - re-activating the extension
     void refreshAll()
     let pollTimer: ReturnType<typeof setTimeout> | null = null
     const scheduleNextPoll = async (): Promise<void> => {
@@ -185,7 +198,7 @@ export function activate(context: vscode.ExtensionContext): void {
             // CLI failure shouldn't break the polling loop — fall back to slow interval.
         }
         pollTimer = setTimeout(async () => {
-            await refreshAll()
+            await refreshLocalOnly()
             void scheduleNextPoll()
         }, nextMs)
     }
