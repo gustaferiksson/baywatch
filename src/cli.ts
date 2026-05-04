@@ -4,13 +4,14 @@ import { reviewPR } from "./agents/review-pr.ts"
 import { solveIssue } from "./agents/solve-issue.ts"
 import { formatSize, listCloneCandidates, parseDuration, removeClone } from "./clean.ts"
 import { BAYWATCH_ROOT, loadConfig } from "./config.ts"
-import { discoverIssues, discoverPRs } from "./discovery.ts"
+import { discoverIssues, discoverIssuesByRefs, discoverPRs, discoverPRsByRefs } from "./discovery.ts"
 import { printDoctorReport, runDoctor } from "./doctor.ts"
 import { installSpecs } from "./install-specs.ts"
 import { formatAge, formatDuration, listRecentLogs } from "./logs.ts"
 import { noteFilePath, readNote, writeNote } from "./notes.ts"
 import { pickIssues, pickPRs } from "./picker.ts"
-import { getLatestReviewFor, getRun } from "./state.ts"
+import { cancelRun, getLatestReviewFor, getRun, listRuns } from "./state.ts"
+import { $ } from "bun"
 
 const HELP = `baywatch — personal agent orchestrator
 
@@ -21,7 +22,7 @@ COMMANDS
   list issues [--json] [REF ...]                              Issues assigned (+ ad-hoc refs)
   list prs [--json] [REF ...]                                 PRs assigned + review-requested (+ ad-hoc refs)
   dev [--dry-run] [--only] [--auto] [--limit N] [REF ...]     Run the dev agent (no args + TTY → picker)
-  review [--dry-run] [--only] [--auto] [--limit N] [REF ...]  Run the review agent (no args + TTY → picker)
+  review [--dry-run] [--only] [--auto] [--limit N] [--force] [REF ...]  Run the review agent (no args + TTY → picker)
   review --bundle REF [REF ...]                               Review multiple PRs together as one cross-PR review
   review --for-issue REF                                      Review every PR actively linked to this issue (Dev panel)
   logs [<id>] [--follow] [--running] [--json] [--limit N]     Recent agent run logs (id picks one; --follow tails; --json for tooling)
@@ -30,6 +31,7 @@ COMMANDS
   notes <REF> [--print | --path | --write]                    Free-form notes injected into the agent prompt for this REF
   doctor                                                      Pre-flight: gh auth, podman machine, image, env tokens, config
   retry <id>                                                  Re-dispatch the same kind/target as run <id>
+  stop [<id>]                                                 Cancel running runs (kills baywatch-agent containers; <id> marks just that run, no id marks all)
   open <id>                                                   Open the most relevant artifact for run <id> (review .md or agent clone)
   install-specs                                               Build & install Fig autocomplete spec
   -h, --help                                                  Show this help
@@ -40,6 +42,7 @@ REF
 FLAGS
   --only              Run only the explicit REFs; skip auto-discovery
   --auto              Skip the interactive picker; take first --limit from discovery
+  --force             review: re-run even if already reviewed at the current head SHA
 `
 
 const REF_RE = /^[^/]+\/[^#]+#\d+$/
@@ -58,6 +61,7 @@ type RunOpts = {
     auto: boolean
     bundle: boolean
     forIssue: string | null
+    force: boolean
 }
 
 const parseRunOpts = (argv: string[]): RunOpts => {
@@ -69,6 +73,7 @@ const parseRunOpts = (argv: string[]): RunOpts => {
         auto: false,
         bundle: false,
         forIssue: null,
+        force: false,
     }
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i]
@@ -78,6 +83,8 @@ const parseRunOpts = (argv: string[]): RunOpts => {
             out.only = true
         } else if (a === "--auto") {
             out.auto = true
+        } else if (a === "--force") {
+            out.force = true
         } else if (a === "--bundle") {
             out.bundle = true
         } else if (a === "--for-issue") {
@@ -217,10 +224,21 @@ const shouldUsePicker = (opts: RunOpts): boolean => {
     return process.stdin.isTTY === true
 }
 
+// We can skip the full auto-discovery (and its many gh search + per-result enrichment
+// calls) whenever the user's refs already cover what they want — either explicitly via
+// --only, or implicitly because they typed enough refs to satisfy --limit. Saves API
+// budget by an order of magnitude on targeted invocations.
+const canSkipAutoDiscovery = (opts: RunOpts): boolean => {
+    if (opts.refs.length === 0) return false
+    return opts.only || opts.refs.length >= opts.limit
+}
+
 const runDev = async (opts: RunOpts): Promise<void> => {
     if (opts.only && opts.refs.length === 0) throw new Error("--only requires at least one REF")
     const cfg = await loadConfig()
-    const all = await discoverIssues(cfg, opts.refs)
+    const all = canSkipAutoDiscovery(opts)
+        ? await discoverIssuesByRefs(opts.refs, cfg)
+        : await discoverIssues(cfg, opts.refs)
 
     let issues: typeof all
     if (shouldUsePicker(opts)) {
@@ -230,10 +248,7 @@ const runDev = async (opts: RunOpts): Promise<void> => {
         }
         issues = await pickIssues(all)
     } else {
-        const filtered = opts.only
-            ? all.filter((i) => opts.refs.includes(`${i.repository.nameWithOwner}#${i.number}`))
-            : all
-        issues = filtered.slice(0, opts.limit)
+        issues = selectByRefsAndLimit(all, opts, (i) => `${i.repository.nameWithOwner}#${i.number}`)
     }
 
     for (const issue of issues) await solveIssue({ issue, config: cfg, dryRun: opts.dryRun })
@@ -249,7 +264,9 @@ const runReview = async (opts: RunOpts): Promise<void> => {
         return
     }
 
-    const all = await discoverPRs(cfg, opts.refs)
+    const all = canSkipAutoDiscovery(opts)
+        ? await discoverPRsByRefs(opts.refs, cfg)
+        : await discoverPRs(cfg, opts.refs)
 
     let prs: typeof all
     if (shouldUsePicker(opts)) {
@@ -259,13 +276,34 @@ const runReview = async (opts: RunOpts): Promise<void> => {
         }
         prs = await pickPRs(all)
     } else {
-        const filtered = opts.only
-            ? all.filter((pr) => opts.refs.includes(`${pr.repository.nameWithOwner}#${pr.number}`))
-            : all
-        prs = filtered.slice(0, opts.limit)
+        prs = selectByRefsAndLimit(all, opts, (pr) => `${pr.repository.nameWithOwner}#${pr.number}`)
     }
 
-    for (const pr of prs) await reviewPR({ pr, config: cfg, dryRun: opts.dryRun })
+    for (const pr of prs) await reviewPR({ pr, config: cfg, dryRun: opts.dryRun, force: opts.force })
+}
+
+// Explicit refs always run, in the order the user typed them. --limit caps the total: refs
+// displace auto-discovered items. So `review #501` (default --limit 1) processes just #501,
+// `review #501 --limit 3` processes #501 + 2 auto, `review --limit 3` processes 3 auto.
+// --only restricts to refs and skips auto entirely. Warns when a typed ref didn't make it
+// into `all` (typo, blocked, fetch failed) so the user isn't left wondering why nothing happened.
+function selectByRefsAndLimit<T>(all: ReadonlyArray<T>, opts: RunOpts, refOf: (item: T) => string): T[] {
+    const requested = opts.refs
+    const byRef = new Map(all.map((item) => [refOf(item), item] as const))
+
+    const explicit: T[] = []
+    for (const ref of requested) {
+        const item = byRef.get(ref)
+        if (item) explicit.push(item)
+        else console.warn(`[discovery] requested ref ${ref} not found in discovery results — skipping`)
+    }
+
+    if (opts.only) return explicit
+
+    const explicitRefs = new Set(requested)
+    const auto = all.filter((item) => !explicitRefs.has(refOf(item)))
+    const remaining = Math.max(0, opts.limit - explicit.length)
+    return [...explicit, ...auto.slice(0, remaining)]
 }
 
 const runClean = (argv: string[]): void => {
@@ -331,10 +369,66 @@ const runRetry = async (argv: string[]): Promise<void> => {
     if (!m?.[1] || !m[2]) throw new Error(`run #${id} has unrecognised target ${run.target}`)
     const ref = `${run.ownerRepo}#${m[2]}`
     const cmd = run.kind === "dev" ? "dev" : "review"
-    console.log(`retrying #${id}: baywatch ${cmd} --only ${ref}`)
-    const proc = Bun.spawn(["baywatch", cmd, "--only", ref], { stdout: "inherit", stderr: "inherit", stdin: "inherit" })
+    // Retry semantically means "do this again" — for review, that requires --force to bypass
+    // the already-reviewed-at-this-head skip. Dev has no equivalent skip so the flag is harmless.
+    const args = run.kind === "review" ? [cmd, "--only", "--force", ref] : [cmd, "--only", ref]
+    console.log(`retrying #${id}: baywatch ${args.join(" ")}`)
+    const proc = Bun.spawn(["baywatch", ...args], { stdout: "inherit", stderr: "inherit", stdin: "inherit" })
     const code = await proc.exited
     if (code !== 0) process.exit(code)
+}
+
+// Kills every container spawned from the baywatch-agent image. We don't track container IDs
+// per-run yet, so stopping any run kills all in-flight ones. Returns the number killed.
+async function killAgentContainers(): Promise<number> {
+    const psResult = await $`podman ps -q --filter ancestor=baywatch-agent`.nothrow().quiet()
+    if (psResult.exitCode !== 0) {
+        console.warn(`[stop] podman ps failed: ${psResult.stderr.toString().trim() || "(no stderr)"}`)
+        return 0
+    }
+    const ids = psResult.stdout.toString().trim().split("\n").filter(Boolean)
+    if (ids.length === 0) return 0
+    const killResult = await $`podman kill ${ids}`.nothrow().quiet()
+    if (killResult.exitCode !== 0) {
+        console.warn(`[stop] podman kill failed: ${killResult.stderr.toString().trim() || "(no stderr)"}`)
+    }
+    return ids.length
+}
+
+const runStop = async (argv: string[]): Promise<void> => {
+    const first = argv[0]
+    if (first === "-h" || first === "--help") {
+        printHelpAndExit()
+        return
+    }
+
+    const running = listRuns({ status: "running" })
+    if (running.length === 0) {
+        console.log("No running runs.")
+        return
+    }
+
+    const targets = first !== undefined ? running.filter((r) => r.id === parseRunId(first)) : running
+    if (first !== undefined && targets.length === 0) {
+        const id = parseRunId(first)
+        const r = getRun(id)
+        if (!r) throw new Error(`no run with id ${id}`)
+        console.log(`run #${id} is not running (status: ${r.status})`)
+        return
+    }
+
+    if (first !== undefined && running.length > targets.length) {
+        console.log(
+            `note: stopping #${parseRunId(first)} kills all ${running.length} baywatch-agent container(s) (per-run isolation isn't tracked yet)`
+        )
+    }
+
+    const killed = await killAgentContainers()
+    console.log(`killed ${killed} container(s)`)
+    for (const r of targets) {
+        const ok = cancelRun(r.id)
+        console.log(ok ? `✓ #${r.id} cancelled` : `  #${r.id} already terminated`)
+    }
 }
 
 const runOpen = async (argv: string[]): Promise<void> => {
@@ -533,6 +627,9 @@ try {
         }
         case "retry":
             await runRetry(argv.slice(1))
+            break
+        case "stop":
+            await runStop(argv.slice(1))
             break
         case "open":
             await runOpen(argv.slice(1))

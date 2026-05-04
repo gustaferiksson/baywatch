@@ -1,18 +1,16 @@
-import { existsSync } from "node:fs"
-import { homedir } from "node:os"
-import path from "node:path"
-
 // Resolve the env vars the agent needs inside the sandbox.
 // Bun auto-loads `.env` from cwd, so `process.env` already reflects whatever is there.
 //
-// Anthropic auth: there are two flavours and they behave differently —
-//   1. ~/.claude/auth.json (from `claude auth login`)  — full-scope, supports Remote Control
-//      (sessions appear at claude.ai/code). Mounted into the sandbox by the agent code.
-//   2. CLAUDE_CODE_OAUTH_TOKEN env (from `claude setup-token`) — inference-only, does NOT
-//      support Remote Control. Forwarded as a fallback when auth.json isn't available.
-// Per the official docs (https://code.claude.com/docs/en/remote-control.md): "tokens
-// from setup-token are limited to inference-only and cannot establish Remote Control
-// sessions." So we prefer auth.json mounting over env-var fallback.
+// Anthropic auth inside the container:
+//   - `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) — inference-only. Spawned
+//     agents authenticate but DON'T appear at claude.ai/code (no Remote Control session).
+//   - `ANTHROPIC_API_KEY` — pay-per-token, also inference-only.
+//
+// Remote Control (sessions visible at claude.ai/code) requires the full OAuth from
+// `claude auth login`, which on Linux is stored in libsecret/gnome-keyring. The bare
+// Debian container has no keyring service, so we can't currently provide it. If you want
+// Remote Control inside the sandbox, the container needs libsecret + gnome-keyring-daemon
+// + pre-populated secret — open follow-up work, not implemented today.
 //
 // GitHub auth (optional but expected): `GITHUB_TOKEN` with read-only scopes
 // (Contents: read, Issues: read, PRs: read). The agent's `gh` inside the sandbox uses this.
@@ -20,13 +18,12 @@ import path from "node:path"
 export function loadAgentEnv(): Record<string, string> {
     const oauth = process.env.CLAUDE_CODE_OAUTH_TOKEN
     const apiKey = process.env.ANTHROPIC_API_KEY
-    const hasAuthJson = existsSync(hostClaudeAuthPath())
-    if (!oauth && !apiKey && !hasAuthJson) {
+    if (!oauth && !apiKey) {
         throw new Error(
-            "No Claude credentials found.\n" +
-                "  Recommended (supports Remote Control): claude auth login  → mounts ~/.claude/auth.json into the sandbox\n" +
-                "  Fallback (inference-only):             claude setup-token  → CLAUDE_CODE_OAUTH_TOKEN=... in baywatch/.env\n" +
-                "  Pay-per-token:                         ANTHROPIC_API_KEY=...                in baywatch/.env"
+            "No Claude credentials found in env.\n" +
+                "  Inference-only (recommended for now): claude setup-token  → CLAUDE_CODE_OAUTH_TOKEN=... in baywatch/.env\n" +
+                "  Pay-per-token:                        ANTHROPIC_API_KEY=...                in baywatch/.env\n" +
+                "  Note: Remote Control (sessions at claude.ai/code) is NOT supported in the current container — needs libsecret."
         )
     }
     const env: Record<string, string> = {}
@@ -36,8 +33,4 @@ export function loadAgentEnv(): Record<string, string> {
     if (ghToken) env.GITHUB_TOKEN = ghToken
     else console.warn("[agent-env] GITHUB_TOKEN not set — `gh` inside the sandbox will be unauthenticated.")
     return env
-}
-
-export function hostClaudeAuthPath(): string {
-    return path.join(homedir(), ".claude", "auth.json")
 }

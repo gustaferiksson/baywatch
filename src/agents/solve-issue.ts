@@ -80,7 +80,7 @@ export async function solveIssue(opts: {
                 imageName: SANDBOX_IMAGE,
                 selinuxLabel: false,
                 env: loadAgentEnv(),
-                mounts: sandboxMounts.mounts,
+                mounts: sandboxMounts,
             }),
             cwd: clone.path,
             promptFile: PROMPT_PATH,
@@ -123,8 +123,6 @@ export async function solveIssue(opts: {
     } catch (err) {
         completeRun(runId, { status: "failed", errorSummary: (err as Error).message })
         throw err
-    } finally {
-        await sandboxMounts.cleanup()
     }
 }
 

@@ -98,6 +98,93 @@ type Candidate = {
     reason: DiscoveredPR["reasonForReview"]
 }
 
+// Fast path for explicit refs: 1 `gh pr view` per ref, no `gh search` queries.
+// Use this when the caller knows exactly which PRs they want — saves ~3 search calls
+// and (N - refs) view calls compared to `discoverPRs` enriching every assigned /
+// review-requested / authored result. Reason is "watchlist" (we don't classify because
+// classifying would require the same search queries we're trying to skip).
+export async function discoverPRsByRefs(refs: ReadonlyArray<string>, config: BaywatchConfig): Promise<DiscoveredPR[]> {
+    const parsed: { ownerRepo: string; num: number; ref: string }[] = []
+    for (const ref of refs) {
+        const m = ref.match(/^([^/]+\/[^#]+)#(\d+)$/)
+        if (!m?.[1] || !m[2]) {
+            console.warn(`[discovery] ignoring malformed ref: ${ref}`)
+            continue
+        }
+        if (isBlocked(m[1], config.blocklist)) {
+            console.warn(`[discovery] ${ref} is in blocklist — skipping`)
+            continue
+        }
+        parsed.push({ ownerRepo: m[1], num: Number.parseInt(m[2], 10), ref })
+    }
+    const fetched = await Promise.allSettled(parsed.map((p) => getPR(p.ownerRepo, p.num)))
+    const results: DiscoveredPR[] = []
+    for (let i = 0; i < parsed.length; i++) {
+        const p = parsed[i]
+        const r = fetched[i]
+        if (!p || !r) continue
+        if (r.status !== "fulfilled") {
+            console.warn(`[discovery] failed to fetch ${p.ref}: ${r.reason}`)
+            continue
+        }
+        const full = r.value
+        const last = getLatestReviewFor(full.repository.nameWithOwner, full.number)
+        const reviewedAtThisHead = !!last && last.headSha === full.headRefOid
+        results.push({
+            ...full,
+            repoPath: findRepoPath(full.repository.nameWithOwner, config.cloneRoots),
+            reasonForReview: "watchlist",
+            alreadyReviewedAtThisHead: reviewedAtThisHead,
+            lastReviewedAt: last?.reviewedAt ?? null,
+            lastReviewedHead: last?.headSha ?? null,
+            verdictAtCurrentHead: reviewedAtThisHead ? (last?.verdict ?? null) : null,
+        })
+    }
+    return results
+}
+
+// Fast path for explicit issue refs (mirror of discoverPRsByRefs). Skips
+// `gh issue list --assignee` + per-issue linked-PR GraphQL calls.
+export async function discoverIssuesByRefs(
+    refs: ReadonlyArray<string>,
+    config: BaywatchConfig
+): Promise<DiscoveredIssue[]> {
+    const parsed: { ownerRepo: string; num: number; ref: string }[] = []
+    for (const ref of refs) {
+        const m = ref.match(/^([^/]+\/[^#]+)#(\d+)$/)
+        if (!m?.[1] || !m[2]) {
+            console.warn(`[discovery] ignoring malformed ref: ${ref}`)
+            continue
+        }
+        if (isBlocked(m[1], config.blocklist)) {
+            console.warn(`[discovery] ${ref} is in blocklist — skipping`)
+            continue
+        }
+        parsed.push({ ownerRepo: m[1], num: Number.parseInt(m[2], 10), ref })
+    }
+    const fetched = await Promise.allSettled(parsed.map((p) => getIssue(p.ownerRepo, p.num)))
+    // Skip the linked-PR GraphQL lookup on the fast path — it's another N API calls.
+    // The caller asked for these specific issues; if they need linked-PR data, they can
+    // call without --only.
+    const results: DiscoveredIssue[] = []
+    for (let i = 0; i < parsed.length; i++) {
+        const p = parsed[i]
+        const r = fetched[i]
+        if (!p || !r) continue
+        if (r.status !== "fulfilled") {
+            console.warn(`[discovery] failed to fetch ${p.ref}: ${r.reason}`)
+            continue
+        }
+        const issue = r.value
+        results.push({
+            ...issue,
+            repoPath: findRepoPath(issue.repository.nameWithOwner, config.cloneRoots),
+            linkedOpenPRs: [],
+        })
+    }
+    return results
+}
+
 export async function discoverPRs(config: BaywatchConfig, watchlist: string[] = []): Promise<DiscoveredPR[]> {
     const [assigned, reviewRequested, authored] = await Promise.all([
         listAssignedPRs(),

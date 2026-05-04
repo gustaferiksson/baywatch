@@ -120,6 +120,10 @@ const completionSpec: Fig.Spec = {
                 autoOption,
                 limitOption,
                 {
+                    name: "--force",
+                    description: "Re-run even if already reviewed at the current head SHA",
+                },
+                {
                     name: "--bundle",
                     description: "Review multiple PRs together as one cross-PR review (use with REFs)",
                 },
@@ -184,6 +188,37 @@ const completionSpec: Fig.Spec = {
             name: "retry",
             description: "Re-dispatch the same kind/target as a previous run",
             args: { name: "run-id", description: "Numeric run id from `baywatch logs`", isOptional: false },
+        },
+        {
+            name: "stop",
+            description:
+                "Cancel running runs (kills baywatch-agent containers; with id, marks just that run, otherwise all)",
+            args: {
+                name: "run-id",
+                description: "Numeric run id from `baywatch logs --running` (omit to cancel all running runs)",
+                isOptional: true,
+                generators: {
+                    script: ["sh", "-c", "baywatch logs --running --json --limit 25 2>/dev/null"],
+                    cache: { ttl: 2_000 },
+                    postProcess: (out: string) => {
+                        try {
+                            const runs = JSON.parse(out) as Array<{
+                                runId: number
+                                kind: string
+                                ownerRepo: string
+                                target: string
+                            }>
+                            return runs.map((r) => ({
+                                name: String(r.runId),
+                                description: `[${r.kind}] ${r.ownerRepo} ${r.target}`,
+                                priority: 100,
+                            }))
+                        } catch {
+                            return []
+                        }
+                    },
+                },
+            },
         },
         {
             name: "open",

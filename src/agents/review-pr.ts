@@ -19,13 +19,21 @@ const PROMPT_PATH = path.join(BAYWATCH_ROOT, "prompts", "review-pr.md")
 const REVIEWS_HOST_DIR = path.join(BAYWATCH_ROOT, "reviews")
 const REVIEWS_SANDBOX_DIR = "/baywatch-reviews"
 
-export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig; dryRun: boolean }): Promise<void> {
-    const { pr, config, dryRun } = opts
+export async function reviewPR(opts: {
+    pr: DiscoveredPR
+    config: BaywatchConfig
+    dryRun: boolean
+    force?: boolean
+}): Promise<void> {
+    const { pr, config, dryRun, force } = opts
     const ownerRepo = pr.repository.nameWithOwner
 
-    if (pr.alreadyReviewedAtThisHead) {
+    if (pr.alreadyReviewedAtThisHead && !force) {
         console.log(`[review] ${ownerRepo}#${pr.number} — already reviewed at ${pr.headRefOid.slice(0, 7)}, skipping`)
         return
+    }
+    if (pr.alreadyReviewedAtThisHead && force) {
+        console.log(`[review] ${ownerRepo}#${pr.number} — re-running (--force) over review at ${pr.headRefOid.slice(0, 7)}`)
     }
     if (!pr.repoPath) {
         console.error(`[review] no local clone for ${ownerRepo}; skipping PR #${pr.number}`)
@@ -88,7 +96,7 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
                 imageName: SANDBOX_IMAGE,
                 selinuxLabel: false,
                 env: loadAgentEnv(),
-                mounts: [{ hostPath: REVIEWS_HOST_DIR, sandboxPath: REVIEWS_SANDBOX_DIR }, ...sandboxMounts.mounts],
+                mounts: [{ hostPath: REVIEWS_HOST_DIR, sandboxPath: REVIEWS_SANDBOX_DIR }, ...sandboxMounts],
             }),
             cwd: clone.path,
             ...(hooks ? { hooks } : {}),
@@ -137,7 +145,5 @@ export async function reviewPR(opts: { pr: DiscoveredPR; config: BaywatchConfig;
     } catch (err) {
         completeRun(runId, { status: "failed", errorSummary: (err as Error).message })
         throw err
-    } finally {
-        await sandboxMounts.cleanup()
     }
 }

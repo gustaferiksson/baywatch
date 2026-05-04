@@ -1,5 +1,4 @@
 import { existsSync } from "node:fs"
-import { homedir } from "node:os"
 import path from "node:path"
 import { $ } from "bun"
 
@@ -83,7 +82,7 @@ function checkEnvTokens(): CheckResult {
             name: "Claude credentials in env",
             status: "fail",
             detail: "neither CLAUDE_CODE_OAUTH_TOKEN nor ANTHROPIC_API_KEY set",
-            hint: "run `claude setup-token` and put it in baywatch/.env (or just use `claude auth login` — see next check)",
+            hint: "run `claude setup-token` and put it in baywatch/.env",
         }
     }
     const claudeNote = oauth ? "CLAUDE_CODE_OAUTH_TOKEN set" : "ANTHROPIC_API_KEY set"
@@ -98,30 +97,17 @@ function checkEnvTokens(): CheckResult {
     return { name: "Claude credentials in env", status: "ok", detail: `${claudeNote}; GITHUB_TOKEN set` }
 }
 
-async function checkClaudeAuth(): Promise<CheckResult> {
-    if (process.platform === "darwin") {
-        // macOS stores Claude Code credentials in the Keychain, not a file.
-        const out = await $`security find-generic-password -s "Claude Code-credentials" 2>/dev/null`.nothrow().quiet()
-        if (out.exitCode !== 0) {
-            return {
-                name: "Remote Control auth (Keychain)",
-                status: "warn",
-                detail: "no `Claude Code-credentials` entry in macOS Keychain — sandboxed agents will not appear at claude.ai/code",
-                hint: "run `claude auth login` once on the host; baywatch extracts the credential at runtime and mounts it into the sandbox",
-            }
-        }
-        return { name: "Remote Control auth (Keychain)", status: "ok", detail: "Claude Code-credentials present" }
+function checkRemoteControlNote(): CheckResult {
+    // Spawned agents authenticate via CLAUDE_CODE_OAUTH_TOKEN (inference-only). They do
+    // NOT appear at claude.ai/code's Remote Control UI — that requires the OS keyring
+    // (libsecret on Linux), which the bare Debian container doesn't have. This is an
+    // FYI, not a failure.
+    return {
+        name: "Remote Control inside sandbox",
+        status: "warn",
+        detail: "not supported in current container — agents are inference-only",
+        hint: "spawned agents won't appear at claude.ai/code; needs libsecret + gnome-keyring-daemon in the Containerfile",
     }
-    const auth = path.join(homedir(), ".claude", "auth.json")
-    if (!existsSync(auth)) {
-        return {
-            name: "Remote Control auth (~/.claude/auth.json)",
-            status: "warn",
-            detail: "missing — sandboxed agents will not appear at claude.ai/code",
-            hint: "run `claude auth login` once on the host",
-        }
-    }
-    return { name: "Remote Control auth (~/.claude/auth.json)", status: "ok", detail: auth }
 }
 
 function checkConfig(): CheckResult {
@@ -143,7 +129,7 @@ export async function runDoctor(): Promise<{ checks: CheckResult[]; ok: boolean 
         checkPodmanMachine(),
         checkImage(),
         Promise.resolve(checkEnvTokens()),
-        checkClaudeAuth(),
+        Promise.resolve(checkRemoteControlNote()),
         Promise.resolve(checkConfig()),
     ])
     const ok = checks.every((c) => c.status !== "fail")

@@ -199,10 +199,21 @@ export function completeRun(
     id: number,
     opts: { status: RunStatus; logPath?: string | null; errorSummary?: string | null }
 ): void {
+    // Guard on status='running' so a `baywatch stop` that already transitioned the run to
+    // 'cancelled' isn't clobbered by the parent process catching the container kill and then
+    // calling completeRun(..., 'failed') in its own catch block. Cancellation wins.
     const stmt = getDb().query(
-        `UPDATE runs SET status = ?, finished_at = ?, log_path = COALESCE(?, log_path), error_summary = COALESCE(?, error_summary) WHERE id = ?`
+        `UPDATE runs SET status = ?, finished_at = ?, log_path = COALESCE(?, log_path), error_summary = COALESCE(?, error_summary) WHERE id = ? AND status = 'running'`
     )
     stmt.run(opts.status, Date.now(), opts.logPath ?? null, opts.errorSummary ?? null, id)
+}
+
+export function cancelRun(id: number): boolean {
+    const stmt = getDb().query(
+        `UPDATE runs SET status = 'cancelled', finished_at = ?, error_summary = COALESCE(error_summary, 'cancelled by user') WHERE id = ? AND status = 'running'`
+    )
+    const result = stmt.run(Date.now(), id)
+    return result.changes > 0
 }
 
 export function getRun(id: number): RunRecord | null {
