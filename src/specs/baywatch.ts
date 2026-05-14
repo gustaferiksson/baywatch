@@ -54,6 +54,74 @@ const issueRefArg: Fig.Arg = {
     },
 }
 
+// Walks ~/Repos/<owner>/<repo>/.git and surfaces `owner/repo` pairs.
+// Matches baywatch's `findRepoPath` model where the cloneRoot's basename is the
+// owner — i.e. `~/Repos/Gustaf/baywatch` shows up as `Gustaf/baywatch`.
+const sessionRepoArg: Fig.Arg = {
+    name: "owner/repo",
+    description: "Local git repo (Tab → pick from ~/Repos/<owner>/<repo>)",
+    generators: {
+        script: [
+            "sh",
+            "-c",
+            "find ~/Repos -mindepth 3 -maxdepth 3 -type d -name .git 2>/dev/null",
+        ],
+        cache: { ttl: 30_000 },
+        postProcess: (out: string) => {
+            const seen = new Set<string>()
+            const entries: Fig.Suggestion[] = []
+            for (const line of out.split("\n")) {
+                const trimmed = line.trim()
+                if (!trimmed) continue
+                const parts = trimmed.split("/")
+                // .../<owner>/<repo>/.git → owner = parts[-3], repo = parts[-2]
+                const repo = parts[parts.length - 2]
+                const owner = parts[parts.length - 3]
+                if (!repo || !owner) continue
+                const ref = `${owner}/${repo}`
+                if (seen.has(ref)) continue
+                seen.add(ref)
+                entries.push({
+                    name: ref,
+                    description: trimmed.replace("/.git", ""),
+                })
+            }
+            return entries.sort((a, b) => String(a.name).localeCompare(String(b.name)))
+        },
+    },
+}
+
+const sessionIdArg: Fig.Arg = {
+    name: "id-or-name",
+    description: "Session id or name (Tab → pick from baywatch session ls)",
+    generators: {
+        script: ["sh", "-c", "baywatch session ls --json 2>/dev/null"],
+        cache: { ttl: 2_000 },
+        postProcess: (out: string) => {
+            try {
+                const list = JSON.parse(out) as Array<{
+                    id: string
+                    name: string
+                    repo: string
+                    state: string
+                }>
+                // Show the readable label first, keep the (short) id as the
+                // secondary description. The id is what actually gets inserted
+                // as the CLI arg via insertValue.
+                return list.map((s) => ({
+                    name: s.id,
+                    displayName: `[${s.state}] ${s.name} (${s.repo})`,
+                    description: s.id,
+                    insertValue: s.id,
+                    priority: s.state === "awaiting-input" ? 100 : 80,
+                }))
+            } catch {
+                return []
+            }
+        },
+    },
+}
+
 const prRefArg: Fig.Arg = {
     name: "pr-ref",
     description: "owner/repo#num (Tab to pick from your discoverable PRs)",
@@ -173,6 +241,52 @@ const completionSpec: Fig.Spec = {
                     name: "--limit",
                     description: "How many recent logs to list",
                     args: { name: "n", suggestions: ["5", "10", "25"] },
+                },
+            ],
+        },
+        {
+            name: "session",
+            description: "Manage sandboxed Claude sessions (Podman + Remote Control)",
+            args: { ...sessionIdArg, isOptional: true },
+            subcommands: [
+                {
+                    name: "login",
+                    description: "One-time setup: log the baywatch identity into Claude (browser flow)",
+                    options: [
+                        { name: "--force", description: "Re-login even if already set up" },
+                    ],
+                },
+                {
+                    name: "new",
+                    description: "Start a new sandboxed session for the given repo",
+                    args: sessionRepoArg,
+                    options: [
+                        {
+                            name: "--name",
+                            description: "Human-readable session name (also the claude.ai/code title)",
+                            args: { name: "name" },
+                        },
+                    ],
+                },
+                {
+                    name: "ls",
+                    description: "List sandboxed sessions",
+                    options: [jsonOption],
+                },
+                {
+                    name: "attach",
+                    description: "Reattach a TTY to a running session's tmux/claude",
+                    args: sessionIdArg,
+                },
+                {
+                    name: "stop",
+                    description: "Stop a session's container (keeps clone + metadata)",
+                    args: sessionIdArg,
+                },
+                {
+                    name: "rm",
+                    description: "Stop + delete a session entirely (clone included)",
+                    args: sessionIdArg,
                 },
             ],
         },

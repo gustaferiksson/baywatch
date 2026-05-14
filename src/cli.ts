@@ -1,4 +1,11 @@
 #!/usr/bin/env bun
+import {
+    attachSession,
+    loginSession,
+    removeSession,
+    runSession,
+    stopSession,
+} from "./agents/session.ts"
 import { reviewBundle } from "./agents/review-bundle.ts"
 import { reviewPR } from "./agents/review-pr.ts"
 import { solveIssue } from "./agents/solve-issue.ts"
@@ -10,6 +17,8 @@ import { installSpecs } from "./install-specs.ts"
 import { formatAge, formatDuration, listRecentLogs } from "./logs.ts"
 import { noteFilePath, readNote, writeNote } from "./notes.ts"
 import { pickIssues, pickPRs } from "./picker.ts"
+import { pickSession } from "./sessionPicker.ts"
+import { findSession, listSessions } from "./sessionsState.ts"
 import { cancelRun, getLatestReviewFor, getRun, listRuns } from "./state.ts"
 import { $ } from "bun"
 
@@ -25,6 +34,13 @@ COMMANDS
   review [--dry-run] [--only] [--auto] [--limit N] [--force] [REF ...]  Run the review agent (no args + TTY → picker)
   review --bundle REF [REF ...]                               Review multiple PRs together as one cross-PR review
   review --for-issue REF                                      Review every PR actively linked to this issue (Dev panel)
+  session [<id|name>]                                         Pick a sandboxed Claude session (no args + TTY → picker)
+  session login [--force]                                     One-time setup: log the baywatch identity into Claude
+  session new <owner/repo> [--name <n>]                       Start a new sandboxed session for the repo
+  session ls [--json]                                         List sandboxed sessions
+  session attach <id|name>                                    Reattach a TTY to a running session's tmux/claude
+  session stop <id|name>                                      Stop a session's container (keeps clone + metadata)
+  session rm <id|name>                                        Stop + delete a session entirely
   logs [<id>] [--follow] [--running] [--json] [--limit N]     Recent agent run logs (id picks one; --follow tails; --json for tooling)
   image-build                                                 Rebuild the baywatch-agent podman image
   clean clones [--older-than 14d] [--dry-run]                 Remove ~/.baywatch/clones/ entries older than threshold (skips in-flight)
@@ -583,6 +599,134 @@ const printRun = (log: ReturnType<typeof listRecentLogs>[number]): void => {
     if (log.status === "failed" && log.errorSummary) console.log(`              error: ${log.errorSummary}`)
 }
 
+// ----- session subcommands -----
+
+const REPO_RE = /^[^/]+\/[^/]+$/
+
+const runSessionCmd = async (argv: string[]): Promise<void> => {
+    const sub = argv[0]
+    if (sub === "-h" || sub === "--help") {
+        printHelpAndExit()
+        return
+    }
+    switch (sub) {
+        case "new":
+            await runSessionNew(argv.slice(1))
+            return
+        case "login": {
+            const force = argv.slice(1).includes("--force")
+            await loginSession({ force })
+            return
+        }
+        case "ls":
+            await runSessionLs(argv.slice(1))
+            return
+        case "attach": {
+            const target = argv[1]
+            if (!target) throw new Error("session attach requires <id|name>")
+            await attachSession(target)
+            return
+        }
+        case "stop": {
+            const target = argv[1]
+            if (!target) throw new Error("session stop requires <id|name>")
+            const s = await stopSession(target)
+            console.log(`✓ ${s.id} stopped`)
+            return
+        }
+        case "rm": {
+            const target = argv[1]
+            if (!target) throw new Error("session rm requires <id|name>")
+            const s = await removeSession(target)
+            console.log(`✓ ${s.id} removed`)
+            return
+        }
+        case undefined:
+            await runSessionPick(null)
+            return
+        default:
+            // Treat bare arg as id/name: `baywatch session ab12cd`
+            await runSessionPick(sub)
+    }
+}
+
+const runSessionNew = async (argv: string[]): Promise<void> => {
+    let repo: string | null = null
+    let name: string | null = null
+    for (let i = 0; i < argv.length; i++) {
+        const a = argv[i]
+        if (a === "--name") {
+            const v = argv[i + 1]
+            if (v === undefined) throw new Error("--name requires a value")
+            name = v
+            i++
+        } else if (a === "-h" || a === "--help") {
+            printHelpAndExit()
+        } else if (a !== undefined && !a.startsWith("-")) {
+            if (repo !== null) throw new Error(`unexpected positional: ${a}`)
+            repo = a
+        } else {
+            throw new Error(`unknown arg: ${a}`)
+        }
+    }
+    if (!repo) throw new Error("session new requires an owner/repo argument")
+    if (!REPO_RE.test(repo)) throw new Error(`bad repo (expected owner/name): ${repo}`)
+    const config = await loadConfig()
+    const sessionName = name ?? `${repo.split("/")[1]}-${Date.now().toString(36).slice(-4)}`
+    const meta = await runSession({ repo, name: sessionName, config })
+    console.log(`✓ session ${meta.id} started`)
+    console.log(`  name:      ${meta.name}`)
+    console.log(`  repo:      ${meta.repo}`)
+    console.log(`  branch:    ${meta.branch}`)
+    console.log(`  clone:     ${meta.clonePath}`)
+    console.log(`  container: ${meta.containerName}`)
+    if (meta.rcEnvironmentUrl) console.log(`  url:       ${meta.rcEnvironmentUrl}`)
+}
+
+const runSessionLs = async (argv: string[]): Promise<void> => {
+    const json = argv.includes("--json")
+    const sessions = await listSessions()
+    if (json) {
+        process.stdout.write(`${JSON.stringify(sessions, null, 2)}\n`)
+        return
+    }
+    if (sessions.length === 0) {
+        console.log("No sessions.")
+        return
+    }
+    for (const s of sessions) {
+        console.log(`${s.id}  [${s.state.padEnd(14)}]  ${s.name.padEnd(30)}  ${s.repo}`)
+        if (s.rcEnvironmentUrl) console.log(`        ${s.rcEnvironmentUrl}`)
+    }
+}
+
+const runSessionPick = async (idOrName: string | null): Promise<void> => {
+    if (idOrName) {
+        const s = await findSession(idOrName)
+        if (!s) throw new Error(`No session matching '${idOrName}'`)
+        await attachSession(s.id)
+        return
+    }
+
+    if (process.stdin.isTTY !== true) {
+        // Not a TTY — fall back to ls so scripts don't hang on the picker.
+        await runSessionLs([])
+        return
+    }
+
+    const config = await loadConfig()
+    const result = await pickSession(config)
+    if (result === null) return
+    if (result.kind === "new") {
+        const meta = await runSession({ repo: result.repo, name: result.name, config })
+        console.log(`✓ session ${meta.id} started — attaching…`)
+        if (meta.rcEnvironmentUrl) console.log(`  ${meta.rcEnvironmentUrl}`)
+        await attachSession(meta.id)
+        return
+    }
+    await attachSession(result.row.id)
+}
+
 const argv = process.argv.slice(2)
 const cmd = argv[0]
 
@@ -606,6 +750,9 @@ try {
             break
         case "review":
             await runReview(parseRunOpts(argv.slice(1)))
+            break
+        case "session":
+            await runSessionCmd(argv.slice(1))
             break
         case "logs":
             await runLogs(argv.slice(1))

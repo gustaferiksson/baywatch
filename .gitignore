@@ -13,3 +13,8 @@ reviews/
 
 # local config (created from baywatch.config.example.ts) — keeps personal paths out of git
 baywatch.config.ts
+
+# Xcode user / build state
+**/xcuserdata/
+**/*.xcuserstate
+**/.swiftpm/
