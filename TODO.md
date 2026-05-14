@@ -29,13 +29,22 @@ expected leverage. Cross items off when done.
       strategy alternative for hunks with empty placeholders for inserts/deletes.
 - [ ] **Auto-refresh diff while detail visible**. Currently manual via the
       toolbar refresh button.
-- [ ] **Sidebar grouping by state with section headers** (Needs Input /
-      Working / Idle / Done). HIG-native source-list pattern (Mail).
+- [ ] **Sidebar grouping** — by state (Needs Input / Working / Idle / Done)
+      *and* by repo / folder path. HIG-native source-list pattern (Mail). Add a
+      picker in the toolbar to switch grouping mode; persist last choice.
+- [ ] **Sidebar filter / search**. Search field that filters the list by name
+      or repo. Probably via `.searchable(text:)` on the List.
 - [ ] **Last-activity timestamp in sidebar rows** ("2m ago" relative time).
       The `lastEventAt` field is already on `Session`.
 - [ ] **Diff stats in sidebar rows** ("+15 −8") — cached per-tick.
 - [ ] **"Open clone in Finder / Editor" in context menu**. `NSWorkspace.open()`
       for the clone path, `NSWorkspace.openApplication(...)` for VS Code/Zed.
+- [ ] **Better session naming**. The auto-generated `<repo>-<rand>` is
+      forgettable. Options to consider: (1) prompt for a name in the New
+      Session sheet (we removed it during the keyboard-first simplification),
+      (2) derive a name from the first user prompt the agent receives, (3)
+      add a `baywatch session rename` CLI + an inline rename action in the
+      sidebar context menu.
 
 ## Bigger / strategic
 - [ ] **GitHub integration for issues + PRs in the macOS app**. Different flows
