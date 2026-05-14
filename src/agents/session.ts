@@ -3,8 +3,9 @@ import { homedir } from "node:os"
 import path from "node:path"
 import { $ } from "bun"
 
-import { createAgentClone } from "../agentClone.ts"
+import { createAgentClone, pushBranchToMain } from "../agentClone.ts"
 import type { BaywatchConfig } from "../config.ts"
+import { findRepoPath } from "../prep.ts"
 import { prepRepo } from "../prep.ts"
 import {
     findSession,
@@ -299,6 +300,7 @@ export async function runSession(opts: {
         containerId,
         branch: branchName,
         clonePath: clone.path,
+        mainClonePath: prep.repoPath,
         startedAt: Date.now(),
         rcEnvironmentUrl: rcUrl,
     }
@@ -340,6 +342,7 @@ export async function attachSession(idOrName: string): Promise<never> {
 export async function stopSession(idOrName: string): Promise<SessionRow> {
     const session = await findSession(idOrName)
     if (!session) throw new Error(`No session matching '${idOrName}'`)
+    await syncBranchToMainClone(session)
     await $`podman stop ${session.containerName}`.nothrow().quiet()
     return session
 }
@@ -347,11 +350,52 @@ export async function stopSession(idOrName: string): Promise<SessionRow> {
 export async function removeSession(idOrName: string): Promise<SessionRow> {
     const session = await findSession(idOrName)
     if (!session) throw new Error(`No session matching '${idOrName}'`)
+    await syncBranchToMainClone(session)
     // Stop first (idempotent) so rm doesn't fail on a running container.
     await $`podman stop ${session.containerName}`.nothrow().quiet()
     await $`podman rm -f ${session.containerName}`.nothrow().quiet()
     rmSync(path.join(SESSIONS_ROOT, session.id), { recursive: true, force: true })
     return session
+}
+
+// Mirrors what `baywatch dev`/`review` do at the end of their one-shot runs:
+// fetch the agent's branch from the agent-clone into the user's main clone so
+// the user can `git checkout <branch>` in their normal workspace. Best-effort
+// — never blocks stop/rm on a fetch failure.
+//
+// Old sessions (created before mainClonePath was stored in meta.json) fall
+// back to resolving the main clone via config.cloneRoots.
+async function syncBranchToMainClone(session: SessionRow): Promise<void> {
+    let mainClonePath = session.mainClonePath
+    if (!mainClonePath) {
+        try {
+            const { loadConfig } = await import("../config.ts")
+            const config = await loadConfig()
+            const resolved = findRepoPath(session.repo, config.cloneRoots)
+            if (resolved) mainClonePath = resolved
+        } catch {
+            // fall through — we'll skip with a warning below
+        }
+    }
+    if (!mainClonePath) {
+        console.warn(
+            `[session] no main clone path recorded for ${session.id} (${session.repo}); ` +
+                `agent branch ${session.branch} stays at ${session.clonePath}`
+        )
+        return
+    }
+    try {
+        await pushBranchToMain({
+            path: session.clonePath,
+            mainClonePath,
+            branch: session.branch,
+        })
+        console.log(`[session] ${session.branch} fetched into ${mainClonePath}`)
+    } catch (err) {
+        console.warn(
+            `[session] could not sync ${session.branch} back to ${mainClonePath}: ${(err as Error).message}`
+        )
+    }
 }
 
 // Reads the per-session settings.json (no-op currently — exposed so callers can

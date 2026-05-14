@@ -22,6 +22,11 @@ export type SessionMeta = {
     containerId: string
     branch: string
     clonePath: string
+    /// Path to the user's main clone (e.g. ~/Repos/Gustaf/baywatch). Stored
+    /// so `session stop`/`rm` can fetch the agent branch back into the main
+    /// clone without re-resolving from config. Optional for backwards-compat
+    /// with sessions created before this field existed.
+    mainClonePath?: string
     startedAt: number
     rcEnvironmentUrl: string | null
 }
