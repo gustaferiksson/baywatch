@@ -414,12 +414,18 @@ async function syncBranchToMainClone(session: SessionRow): Promise<void> {
         return
     }
     try {
-        await pushBranchToMain({
+        const result = await pushBranchToMain({
             path: session.clonePath,
             mainClonePath,
             branch: session.branch,
         })
-        console.log(`[session] ${session.branch} fetched into ${mainClonePath}`)
+        if (result.synced) {
+            console.log(`[session] ${session.branch} fetched into ${mainClonePath}`)
+        } else {
+            console.log(
+                `[session] ${session.branch} had no commits beyond origin/HEAD — not bringing it into ${mainClonePath}`
+            )
+        }
     } catch (err) {
         console.warn(
             `[session] could not sync ${session.branch} back to ${mainClonePath}: ${(err as Error).message}`
