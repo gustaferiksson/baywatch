@@ -170,10 +170,13 @@ exec bash --login
 }
 
 // Encodes an absolute path the same way claude-code names project dirs under
-// `~/.claude/projects/`: every `/` becomes `-`. Other characters (including
-// existing dashes and dots) are preserved.
+// `~/.claude/projects/`: every character that isn't `[A-Za-z0-9-]` is replaced
+// with a dash. Existing dashes are preserved verbatim, no collapsing — so
+// `/Users/gustaf/.baywatch/clones/foo--bar` becomes
+// `-Users-gustaf--baywatch-clones-foo--bar` (slash-then-dot → `--`, existing
+// `--` stays).
 function encodeProjectDir(absPath: string): string {
-    return absPath.replace(/\//g, "-")
+    return absPath.replace(/[^A-Za-z0-9-]/g, "-")
 }
 
 // Poll the tmux pane briefly for the Remote Control environment URL so we can
