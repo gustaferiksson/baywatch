@@ -1,4 +1,14 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import {
+    chmodSync,
+    existsSync,
+    mkdirSync,
+    readdirSync,
+    readFileSync,
+    rmSync,
+    statSync,
+    symlinkSync,
+    writeFileSync,
+} from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
 import { $ } from "bun"
@@ -179,6 +189,28 @@ function encodeProjectDir(absPath: string): string {
     return absPath.replace(/[^A-Za-z0-9-]/g, "-")
 }
 
+// Poll the bind-mounted host projects dir for the first transcript JSONL
+// claude writes. Returns its absolute path, or null on timeout. Used to drive
+// the resume-link symlink — we can't predict the session UUID up front, so we
+// wait for claude to pick one and write the first chunk.
+async function extractSessionJsonlPath(
+    hostProjectsDir: string,
+    timeoutMs: number
+): Promise<string | null> {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+        try {
+            const entries = readdirSync(hostProjectsDir)
+            const jsonl = entries.find((e) => e.endsWith(".jsonl"))
+            if (jsonl) return path.join(hostProjectsDir, jsonl)
+        } catch {
+            // dir vanished — bail; the caller will skip the symlink
+        }
+        await Bun.sleep(500)
+    }
+    return null
+}
+
 // Poll the tmux pane briefly for the Remote Control environment URL so we can
 // record it in meta.json. Best-effort: returns null if it doesn't appear within
 // the timeout (the session is still usable; you just won't have a quick-link).
@@ -322,7 +354,39 @@ export async function runSession(opts: {
     const claudeCmd = `tmux new-session -d -s claude /home/agent/.baywatch/session/wrap.sh`
     await $`podman exec ${containerName} bash -lc ${claudeCmd}`.quiet()
 
-    const rcUrl = await extractRcUrl(containerName, 10_000)
+    // Wait for both the RC URL banner and the transcript JSONL in parallel —
+    // each polls independently so a slow Remote Control bridge doesn't delay
+    // the resume-link, and vice versa.
+    const [rcUrl, jsonlPath] = await Promise.all([
+        extractRcUrl(containerName, 10_000),
+        extractSessionJsonlPath(hostProjectsDir, 15_000),
+    ])
+
+    // Drop a symlink in the main checkout's project dir pointing at the
+    // session transcript, so `claude --resume` from the user's normal repo
+    // (e.g. ~/Repos/Plugsoftware/plug-hub-ui) lists the baywatch session. The
+    // resume picker filters by encoded-cwd, and the transcript's recorded
+    // `cwd` is the clone path — without this symlink the session is only
+    // discoverable when launching claude from the clone path itself.
+    let resumeLinkPath: string | undefined
+    if (jsonlPath) {
+        const mainProjectsDir = path.join(
+            homedir(),
+            ".claude",
+            "projects",
+            encodeProjectDir(prep.repoPath)
+        )
+        mkdirSync(mainProjectsDir, { recursive: true })
+        const candidate = path.join(mainProjectsDir, path.basename(jsonlPath))
+        try {
+            if (!existsSync(candidate)) symlinkSync(jsonlPath, candidate)
+            resumeLinkPath = candidate
+        } catch (err) {
+            console.warn(
+                `[session] could not create resume-link at ${candidate}: ${(err as Error).message}`
+            )
+        }
+    }
 
     const meta: SessionMeta = {
         id,
@@ -335,6 +399,7 @@ export async function runSession(opts: {
         mainClonePath: prep.repoPath,
         startedAt: Date.now(),
         rcEnvironmentUrl: rcUrl,
+        ...(resumeLinkPath ? { resumeLinkPath } : {}),
     }
     writeFileSync(path.join(sessionDir, "meta.json"), JSON.stringify(meta, null, 2))
     return meta

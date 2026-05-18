@@ -29,6 +29,11 @@ export type SessionMeta = {
     mainClonePath?: string
     startedAt: number
     rcEnvironmentUrl: string | null
+    /// Path to a symlink we drop into the main clone's `~/.claude/projects/`
+    /// dir pointing at this session's transcript JSONL, so `claude --resume`
+    /// from the user's normal checkout lists the baywatch session. Optional —
+    /// older sessions and sessions where the transcript never appeared lack it.
+    resumeLinkPath?: string
 }
 
 export type SessionRow = SessionMeta & {
