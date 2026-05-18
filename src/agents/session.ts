@@ -156,16 +156,24 @@ function buildMergedClaudeJson(): string {
 // inside the container. From there `claude --resume` opens the picker of
 // previous sessions so accidental kills are recoverable without spawning a
 // fresh baywatch session.
-function buildSessionWrapper(name: string): string {
+function buildSessionWrapper(name: string, workdir: string): string {
     const safeName = name.replace(/'/g, "'\\''")
+    const safeWorkdir = workdir.replace(/'/g, "'\\''")
     return `#!/bin/sh
-cd /home/agent/workspace
+cd '${safeWorkdir}'
 echo "[baywatch] launching claude. Detach with Ctrl+C (tmux), or /exit to drop to shell."
 claude -n '${safeName}'
 echo ""
 echo "[baywatch] claude exited. Tip: 'claude --resume' to reopen this session."
 exec bash --login
 `
+}
+
+// Encodes an absolute path the same way claude-code names project dirs under
+// `~/.claude/projects/`: every `/` becomes `-`. Other characters (including
+// existing dashes and dots) are preserved.
+function encodeProjectDir(absPath: string): string {
+    return absPath.replace(/\//g, "-")
 }
 
 // Poll the tmux pane briefly for the Remote Control environment URL so we can
@@ -212,16 +220,6 @@ export async function runSession(opts: {
     writeFileSync(settingsPath, buildSessionSettings())
     writeFileSync(path.join(sessionDir, "status.jsonl"), "")
 
-    const wrapperPath = path.join(sessionDir, "wrap.sh")
-    writeFileSync(wrapperPath, buildSessionWrapper(name))
-    chmodSync(wrapperPath, 0o755)
-
-    // Per-session merged .claude.json — host prefs + identity auth. Mounted
-    // instead of the identity file directly so parallel sessions can't race
-    // on a shared file, and host's ~/.claude.json stays untouched.
-    const claudeJsonPath = path.join(sessionDir, "claude.json")
-    writeFileSync(claudeJsonPath, buildMergedClaudeJson())
-
     const prep = await prepRepo({ ownerRepo: repo, config })
     const branchName = `agent/session-${id}-${slugify(name)}`
     const clone = await createAgentClone({
@@ -231,6 +229,32 @@ export async function runSession(opts: {
         defaultBranch: prep.defaultBranch,
     })
 
+    // Mount the clone at the same path inside the container as it has on host
+    // so the `cwd` claude records in its session JSONL matches a real host
+    // path. Combined with the per-session projects bind-mount below, this is
+    // what makes `claude --resume`, the VSCode extension's agents/sessions
+    // view, and any other discovery tool that scans `~/.claude/projects/`
+    // pick up baywatch sessions natively when opened at the clone path.
+    const containerWorkdir = clone.path
+
+    const wrapperPath = path.join(sessionDir, "wrap.sh")
+    writeFileSync(wrapperPath, buildSessionWrapper(name, containerWorkdir))
+    chmodSync(wrapperPath, 0o755)
+
+    // Pre-create the host-side project dir so the bind-mount has somewhere to
+    // land. Claude inside the container appends `<uuid>.jsonl` files here, and
+    // because both sides share the same path encoding, host claude finds them
+    // under their natural location.
+    const hostProjectsDir = path.join(homedir(), ".claude", "projects", encodeProjectDir(containerWorkdir))
+    mkdirSync(hostProjectsDir, { recursive: true })
+    const containerProjectsDir = `/home/agent/.claude/projects/${encodeProjectDir(containerWorkdir)}`
+
+    // Per-session merged .claude.json — host prefs + identity auth. Mounted
+    // instead of the identity file directly so parallel sessions can't race
+    // on a shared file, and host's ~/.claude.json stays untouched.
+    const claudeJsonPath = path.join(sessionDir, "claude.json")
+    writeFileSync(claudeJsonPath, buildMergedClaudeJson())
+
     const containerName = `baywatch-session-${id}`
     const runArgs: string[] = [
         "podman", "run", "-d",
@@ -239,7 +263,7 @@ export async function runSession(opts: {
         // Map host UID → container UID 1000 so the agent user can read/write the
         // bind-mounted clone, credentials, and per-session dir.
         "--userns=keep-id:uid=1000,gid=1000",
-        "-w", "/home/agent/workspace",
+        "-w", containerWorkdir,
         // Auth: bind-mount both the credentials file (refresh chain) and the
         // .claude.json sibling (org/account cache that Remote Control reads).
         // Both rw so token refreshes and cache updates persist back to host;
@@ -249,7 +273,12 @@ export async function runSession(opts: {
         "-v", `${claudeJsonPath}:/home/agent/.claude.json:rw`,
         "-v", `${sessionDir}:/home/agent/.baywatch/session:rw`,
         "-v", `${settingsPath}:/home/agent/.claude/settings.json:ro`,
-        "-v", `${clone.path}:/home/agent/workspace:rw`,
+        "-v", `${clone.path}:${containerWorkdir}:rw`,
+        // Bind-mount the session's per-cwd projects dir so claude's session
+        // transcripts (JSONL) are written straight to the host. The encoded
+        // dirname includes the unique clone id, so concurrent sessions never
+        // collide.
+        "-v", `${hostProjectsDir}:${containerProjectsDir}:rw`,
         "-e", "CLAUDE_CODE_SANDBOXED=1",
     ]
     // Inherit user-level claude state that's safe to share across containers:

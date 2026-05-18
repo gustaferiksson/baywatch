@@ -18,11 +18,6 @@ expected leverage. Cross items off when done.
       with checkboxes (staged/unstaged), commit message field, Commit button.
       Calls `git add` per checked file + `git commit -m` via podman exec.
       Lets you land the agent's work without leaving the app.
-- [ ] **Sandcastle-style session JSONL linking on stop/rm** *(CLI)*. Pull
-      claude session transcript JSONLs out of the container's
-      `~/.claude/projects/-home-agent-workspace/`, rewrite `cwd` to the host
-      main clone path, and write to `~/.claude/projects/<encoded-main>/` so
-      your host's `claude --resume` picks them up.
 
 ## Quality of life *(macOS app)*
 - [ ] **Side-by-side diff view** (toggle in inspector). DiffView render
@@ -56,6 +51,12 @@ expected leverage. Cross items off when done.
       schema risk).
 
 ## Done recently
+- [x] **Native session discovery via host-matching paths.** Sessions now run
+      with the clone bind-mounted at its real host path inside the container,
+      and `~/.claude/projects/<encoded-clone>/` is bind-mounted too — so
+      JSONLs land directly on the host with the right `cwd`. `claude --resume`,
+      the VSCode extension's agents view, and any other tool that walks
+      `~/.claude/projects/` picks up live baywatch sessions natively.
 - [x] CLI: session lifecycle (new/ls/attach/stop/rm/login), wrap.sh for
       resume, tmux + xterm-256color, hooks → status.jsonl, host
       settings/.claude.json merge, host CLAUDE.md/agents/skills mount.
