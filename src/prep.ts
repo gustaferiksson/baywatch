@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readFileSync } from "node:fs"
+import { appendFileSync, type Dirent, existsSync, readdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { $ } from "bun"
 
@@ -23,9 +23,40 @@ function detectInstallCmd(repoPath: string): string | null {
 export function findRepoPath(ownerRepo: string, cloneRoots: string[]): string | null {
     const repoName = ownerRepo.split("/")[1]
     if (!repoName) return null
+    // Fast path: a repo directly under a clone root.
     for (const root of cloneRoots) {
         const p = path.join(root, repoName)
         if (existsSync(path.join(p, ".git"))) return p
+    }
+    // Fallback: repos grouped in a subfolder (e.g. <root>/vscode-extensions/<repo>).
+    // Search a few levels down, skipping dotdirs / node_modules and not descending
+    // into git repos themselves.
+    for (const root of cloneRoots) {
+        const found = searchForRepo(root, repoName, 3)
+        if (found) return found
+    }
+    return null
+}
+
+function searchForRepo(dir: string, repoName: string, depth: number): string | null {
+    if (depth < 0 || !existsSync(dir)) return null
+    let entries: Dirent[]
+    try {
+        entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+        return null
+    }
+    const subdirs: string[] = []
+    for (const entry of entries) {
+        if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules") continue
+        const full = path.join(dir, entry.name)
+        const isRepo = existsSync(path.join(full, ".git"))
+        if (entry.name === repoName && isRepo) return full
+        if (!isRepo) subdirs.push(full)
+    }
+    for (const sub of subdirs) {
+        const found = searchForRepo(sub, repoName, depth - 1)
+        if (found) return found
     }
     return null
 }

@@ -43,6 +43,7 @@ struct NewSessionSheet: View {
             Divider()
             if !selected.isEmpty { selectedStrip }
             list
+            if let errorMessage { errorBanner(errorMessage) }
             footer
         }
         .frame(width: 520, height: 460)
@@ -169,28 +170,17 @@ struct NewSessionSheet: View {
         VStack(spacing: 0) {
             Divider()
             HStack(spacing: 6) {
-                if let errorMessage {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
-                    Text(errorMessage)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .help(errorMessage)
-                } else {
-                    Image(systemName: "folder")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                    Text(displayRoot)
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Button("Change…") { chooseRoot() }
-                        .buttonStyle(.borderless)
-                        .controlSize(.small)
-                }
+                Image(systemName: "folder")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Text(displayRoot)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Button("Change…") { chooseRoot() }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
                 Spacer(minLength: 6)
                 Text(selected.isEmpty ? "↑↓ navigate · tab select · ↩ create · esc cancel"
                                        : "↩ create \(selected.count) repos · tab toggle · esc cancel")
@@ -200,6 +190,25 @@ struct NewSessionSheet: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
         }
+    }
+
+    private func errorBanner(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+            ScrollView {
+                Text(message)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 96)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.red.opacity(0.08))
+        .overlay(Divider(), alignment: .top)
     }
 
     private var displayRoot: String {
