@@ -2,8 +2,6 @@ import { existsSync, readdirSync, rmSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
 
-import { listRuns } from "./state.ts"
-
 const CLONES_ROOT = path.join(homedir(), ".baywatch", "clones")
 
 export type CloneCandidate = {
@@ -53,14 +51,12 @@ function dirSize(dir: string): number {
     return total
 }
 
-export function listCloneCandidates(opts: CleanOptions): CloneCandidate[] {
+// Filesystem-only scan of ~/.baywatch/clones/. Callers pass the set of clone
+// paths currently in use (live sessions) so this stays a single-domain function
+// — it never reaches into session state itself. A candidate is in-use if any
+// live clone path equals it or lives inside it (nested per-session layout).
+export function listCloneCandidates(opts: CleanOptions, inUsePaths: ReadonlySet<string>): CloneCandidate[] {
     if (!existsSync(CLONES_ROOT)) return []
-
-    const inUseClones = new Set(
-        listRuns({ status: "running" })
-            .map((r) => r.agentClonePath)
-            .filter((p): p is string => p !== null)
-    )
 
     const cutoff = Date.now() - opts.olderThanMs
     const dirs = readdirSync(CLONES_ROOT, { withFileTypes: true }).filter((d) => d.isDirectory())
@@ -70,12 +66,13 @@ export function listCloneCandidates(opts: CleanOptions): CloneCandidate[] {
         const full = path.join(CLONES_ROOT, d.name)
         const mtime = statSync(full).mtime
         if (mtime.getTime() > cutoff) continue
+        const inUse = [...inUsePaths].some((p) => p === full || p.startsWith(`${full}${path.sep}`))
         out.push({
             path: full,
             name: d.name,
             mtime,
             sizeBytes: dirSize(full),
-            inUse: inUseClones.has(full),
+            inUse,
         })
     }
     return out.sort((a, b) => a.mtime.getTime() - b.mtime.getTime())

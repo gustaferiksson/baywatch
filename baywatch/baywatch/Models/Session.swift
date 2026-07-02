@@ -46,16 +46,26 @@ enum SessionState: String, Codable, Hashable {
 
 /// Persisted metadata for a baywatch session. Written by the CLI's
 /// `runSession` to ~/.baywatch/sessions/<id>/meta.json.
-struct SessionMeta: Codable, Hashable, Identifiable {
-    let id: String
-    let name: String
-    let repo: String
-    let containerName: String
-    let containerId: String
+/// One repo within a session's sandbox — mirrors the CLI's SessionRepo.
+struct SessionRepo: Codable, Hashable {
+    let ownerRepo: String
     let branch: String
     let clonePath: String
+}
+
+struct SessionMeta: Codable, Hashable, Identifiable {
+    let id: String
+    let taskId: String
+    let name: String
+    let repos: [SessionRepo]
+    let containerName: String
+    let containerId: String
     let startedAt: Int
     let rcEnvironmentUrl: String?
+
+    /// Single-repo convenience for the current UI during the multi-repo
+    /// transition. The two-level sidebar / per-repo detail slice supersedes it.
+    var primaryRepo: SessionRepo? { repos.first }
 }
 
 /// One hook event line from status.jsonl.

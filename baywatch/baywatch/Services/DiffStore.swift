@@ -27,8 +27,12 @@ final class DiffStore {
 
     func refresh(session: Session) {
         sessionId = session.id
+        guard let repo = session.meta.primaryRepo else {
+            isLoading = false
+            return
+        }
         isLoading = true
-        Task.detached(priority: .userInitiated) { [clonePath = session.meta.clonePath, branch = session.meta.branch] in
+        Task.detached(priority: .userInitiated) { [clonePath = repo.clonePath, branch = repo.branch] in
             let base = GitService.defaultBranch(clonePath: clonePath)
             let raw = GitService.diff(clonePath: clonePath, from: base, to: branch)
             let parsed = DiffParser.parse(raw)

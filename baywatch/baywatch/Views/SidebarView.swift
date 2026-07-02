@@ -63,7 +63,7 @@ struct SidebarView: View {
             }
             Button("Cancel", role: .cancel) { pendingRemoval = nil }
         } message: { session in
-            Text("This stops the container and deletes the agent clone at \(session.meta.clonePath). Local commits on \(session.meta.branch) have already been fetched into your main clone.")
+            Text("This stops the container and deletes the agent clone(s). Local commits have already been fetched into your main clone(s).")
         }
         .alert("Action failed", isPresented: Binding(
             get: { actionError != nil },
@@ -183,7 +183,7 @@ private struct SessionRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(session.meta.name)
                     .lineLimit(1)
-                Text(session.meta.repo)
+                Text(session.meta.repos.map { $0.ownerRepo }.joined(separator: ", "))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -191,7 +191,7 @@ private struct SessionRow: View {
             Spacer(minLength: 0)
         }
         .padding(.vertical, 2)
-        .help("\(session.state.displayName) · \(session.meta.branch)")
+        .help("\(session.state.displayName) · \(session.meta.primaryRepo?.branch ?? "")")
     }
 }
 

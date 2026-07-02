@@ -3,63 +3,98 @@
 Captured so context doesn't get lost between sessions. Roughly ordered by
 expected leverage. Cross items off when done.
 
-## In progress
-- [ ] **Sync agent branch back to main clone on `session stop`/`rm`** — mirrors
-      what `baywatch dev`/`review` already do at the end of a one-shot run.
-      Adds `pushBranchToMain()` call to `stopSession()` and `removeSession()`.
+**Plan of record:** see [`DESIGN.md`](./DESIGN.md) — baywatch is being re-modelled
+from a GitHub issue/PR *workflow* orchestrator into a task-centric, multi-repo
+agent **cockpit** (native macOS only). Phases below track that build.
 
-## Real work, high value
-- [ ] **Persistent terminal cache → instant session switching** *(macOS)*.
-      Maintain a process-wide cache of `LocalProcessTerminalView` per
-      container, keep alive across selection changes, swap visibility instead
-      of dismantling/respawning the PTY. Removes the ~500ms-1s podman exec
-      spawn per switch.
-- [ ] **Stage / commit panel in the detail inspector** *(macOS)*. File list
-      with checkboxes (staged/unstaged), commit message field, Commit button.
-      Calls `git add` per checked file + `git commit -m` via podman exec.
-      Lets you land the agent's work without leaving the app.
+---
 
-## Quality of life *(macOS app)*
-- [ ] **Side-by-side diff view** (toggle in inspector). DiffView render
-      strategy alternative for hunks with empty placeholders for inserts/deletes.
-- [ ] **Auto-refresh diff while detail visible**. Currently manual via the
-      toolbar refresh button.
-- [ ] **Sidebar grouping** — by state (Needs Input / Working / Idle / Done)
-      *and* by repo / folder path. HIG-native source-list pattern (Mail). Add a
-      picker in the toolbar to switch grouping mode; persist last choice.
-- [ ] **Sidebar filter / search**. Search field that filters the list by name
-      or repo. Probably via `.searchable(text:)` on the List.
-- [ ] **Last-activity timestamp in sidebar rows** ("2m ago" relative time).
-      The `lastEventAt` field is already on `Session`.
+## Phase 1 — the orchestrator (ship this first)
+
+The multi-repo Task/Session re-model. Each item is roughly a slice.
+
+- [ ] **Task entity + persistence** — `Task {id,name,query?,repos:[{ownerRepo,
+      branch,mainClonePath}],createdAt}` under `~/.baywatch/tasks/<id>/task.json`.
+      New `src/tasksState.ts`.
+- [ ] **Multi-repo `SessionMeta`** — `repos: SessionRepo[]` + `taskId`; drop the
+      singular `repo/branch/clonePath/mainClonePath`. Adapt `runSession`,
+      `syncBranchToMainClone`, `cli.runSessionNew`. Clean break on state shape
+      (few live sessions; let old single-repo ones age out).
+- [ ] **Swift read-models** follow the new shape (`Session.swift` + call sites).
+- [ ] **Per-session clone-parent mount** — identity-mount
+      `~/.baywatch/clones/<session>/`; each repo is a subdir clone. One mount,
+      N repos, `claude` cwd = the parent so it sees them all.
+- [ ] **Add repo on the fly** — drop a new clone into the mounted parent (appears
+      live, no container restart) AND append it to the Task's `repos`.
+- [ ] **Branch-reuse mode in `createAgentClone`** — continue an existing Task's
+      branch (`checkout -B <branch> <branch>`) vs cut fresh off `origin/<default>`.
+- [ ] **Auto local fetch-back on session end** *(was: "sync branch back on
+      stop/rm")* — `pushBranchToMain` per repo on `stop`/`rm`. No push, never
+      touches your working tree. This is what makes tasks resumable next day.
+- [ ] **`prStatusForBranch()` in `gh.ts`** — `gh pr view <branch> --json
+      statusCheckRollup` → checks state. Local-only branch → "not pushed".
+- [ ] **Two-level sidebar** — Tasks as sections, sessions as rows beneath
+      (reuses `SidebarView`; sort by state rank). *Supersedes the old
+      "group by state/repo" item — grouping is now Task→Session.*
+- [ ] **Per-repo landing strip** in the detail view — branch, **Land** /
+      **Push** / **Create PR** buttons, checks badge. *Absorbs the old
+      "stage/commit panel" item.*
+- [ ] **"Open clone in VS Code/Zed"** per repo — `NSWorkspace.openApplication`.
+      Bridge for hand-editing until the Phase 2 editor lands.
+- [ ] **Task/session naming** — derive from the query (was "better session
+      naming"): `<repo>-<rand>` → task name from first prompt / user-typed.
+
+## Phase 2 — in-app editor (no LSP yet)
+
+- [ ] Native editor via **CodeEditSourceEditor** (AppKit + Tree-sitter
+      highlighting). Edit → save to the clone → container sees it live (identity
+      mount) → lands on fetch-back with the agent's commits.
+
+## Phase 3 — in-container LSP
+
+- [ ] LSP client via ChimeHQ **LanguageClient** / **LanguageServerProtocol**.
+      **Gotcha:** code + deps live *inside* the container → run language servers
+      in the container, spoken to over `podman exec -i <server> --stdio`.
+      Per-language, per-image work, layered on the Phase-2 editor.
+
+---
+
+## Ongoing QoL *(macOS app)* — slot in alongside phases
+
+- [ ] **Persistent terminal cache → instant session switching**. Cache
+      `LocalProcessTerminalView` per container, swap visibility instead of
+      respawning the PTY. Removes ~500ms-1s podman exec spawn per switch.
+- [ ] **Side-by-side diff view** (toggle). DiffView render alternative with
+      empty placeholders for inserts/deletes.
+- [ ] **Auto-refresh diff while detail visible** (currently manual).
+- [ ] **Sidebar filter / search** — `.searchable(text:)` on the list.
+- [ ] **Last-activity timestamp in sidebar rows** ("2m ago"). `lastEventAt`
+      already on `Session`.
 - [ ] **Diff stats in sidebar rows** ("+15 −8") — cached per-tick.
-- [ ] **"Open clone in Finder / Editor" in context menu**. `NSWorkspace.open()`
-      for the clone path, `NSWorkspace.openApplication(...)` for VS Code/Zed.
-- [ ] **Better session naming**. The auto-generated `<repo>-<rand>` is
-      forgettable. Options to consider: (1) prompt for a name in the New
-      Session sheet (we removed it during the keyboard-first simplification),
-      (2) derive a name from the first user prompt the agent receives, (3)
-      add a `baywatch session rename` CLI + an inline rename action in the
-      sidebar context menu.
 
-## Bigger / strategic
-- [ ] **GitHub integration for issues + PRs in the macOS app**. Different flows
-      for review-other-PRs vs my-PRs vs new-dev / pre-dev. Needs design before
-      building.
-- [ ] **Remote Control via libsecret inside the container** — currently we use
-      a *separate* identity so the host's auth stays untouched. The libsecret
-      route would let the same identity multiplex, but is fragile (cross-update
-      schema risk).
+## Parked / strategic
+
+- [ ] **Remote Control via libsecret inside the container** — currently a
+      separate identity keeps host auth untouched. libsecret would let one
+      identity multiplex, but is fragile (cross-update schema risk).
+
+## Superseded by the re-model
+
+- ~~GitHub issue/PR **discovery** integration in the macOS app~~ — GitHub is now
+  a **status surface** (PR checks), not a discovery/workflow engine. The
+  issue/review queues + dev/review workflows are being **deleted**
+  (`discovery.ts`, `reviewVerdict.ts`, `reviews/`, `prompts/`, the VS Code ext).
 
 ## Done recently
-- [x] **Native session discovery via host-matching paths.** Sessions now run
-      with the clone bind-mounted at its real host path inside the container,
-      and `~/.claude/projects/<encoded-clone>/` is bind-mounted too — so
-      JSONLs land directly on the host with the right `cwd`. `claude --resume`,
-      the VSCode extension's agents view, and any other tool that walks
+
+- [x] **Native session discovery via host-matching paths.** Sessions run with
+      the clone bind-mounted at its real host path inside the container, and
+      `~/.claude/projects/<encoded-clone>/` bind-mounted too — so JSONLs land on
+      the host with the right `cwd`. `claude --resume` and any tool that walks
       `~/.claude/projects/` picks up live baywatch sessions natively.
-- [x] CLI: session lifecycle (new/ls/attach/stop/rm/login), wrap.sh for
-      resume, tmux + xterm-256color, hooks → status.jsonl, host
-      settings/.claude.json merge, host CLAUDE.md/agents/skills mount.
+- [x] CLI: session lifecycle (new/ls/attach/stop/rm/login), wrap.sh for resume,
+      tmux + xterm-256color, hooks → status.jsonl, host settings/.claude.json
+      merge, host CLAUDE.md/agents/skills mount.
 - [x] macOS app v1: sidebar with live state, embedded SwiftTerm, diff with
       inline comment popovers + comment indicators, comments panel with
       send-to-session, notifications, Settings.

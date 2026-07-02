@@ -26,7 +26,7 @@ struct DetailHeader: View {
                     Image(systemName: "folder")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(session.meta.repo)
+                    Text(session.meta.repos.map { $0.ownerRepo }.joined(separator: ", "))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -37,7 +37,7 @@ struct DetailHeader: View {
                     Image(systemName: "arrow.triangle.branch")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(session.meta.branch)
+                    Text(session.meta.primaryRepo?.branch ?? "—")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -64,7 +64,7 @@ struct DetailHeader: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This stops the container and deletes the agent clone at \(session.meta.clonePath). Local commits on \(session.meta.branch) have already been fetched into your main clone.")
+            Text("This stops the container and deletes the agent clone(s). Local commits have already been fetched into your main clone(s).")
         }
         .alert("Action failed", isPresented: Binding(
             get: { actionError != nil },

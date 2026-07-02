@@ -14,19 +14,24 @@ export type SessionState =
     | "failed"
     | "stopped"
 
-export type SessionMeta = {
-    id: string
-    name: string
-    repo: string
-    containerName: string
-    containerId: string
+// One repo within a session's sandbox: an isolated clone on its own branch,
+// plus the user's real checkout to fetch the branch back into on session end.
+export type SessionRepo = {
+    ownerRepo: string
     branch: string
     clonePath: string
-    /// Path to the user's main clone (e.g. ~/Repos/Gustaf/baywatch). Stored
-    /// so `session stop`/`rm` can fetch the agent branch back into the main
-    /// clone without re-resolving from config. Optional for backwards-compat
-    /// with sessions created before this field existed.
-    mainClonePath?: string
+    mainClonePath: string
+}
+
+export type SessionMeta = {
+    id: string
+    // The Task this session is a run of. Multiple sessions can share a Task
+    // (same repos + branches) across days — see tasksState.ts.
+    taskId: string
+    name: string
+    repos: SessionRepo[]
+    containerName: string
+    containerId: string
     startedAt: number
     rcEnvironmentUrl: string | null
     /// Path to a symlink we drop into the main clone's `~/.claude/projects/`
@@ -47,7 +52,11 @@ function readMeta(id: string): SessionMeta | null {
     const p = path.join(SESSIONS_ROOT, id, "meta.json")
     if (!existsSync(p)) return null
     try {
-        return JSON.parse(readFileSync(p, "utf8")) as SessionMeta
+        const meta = JSON.parse(readFileSync(p, "utf8")) as SessionMeta
+        // Age out pre-multi-repo sessions (singular repo/branch, no repos[])
+        // instead of crashing readers that expect the array.
+        if (!Array.isArray(meta.repos)) return null
+        return meta
     } catch {
         return null
     }

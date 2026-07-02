@@ -102,7 +102,7 @@ const sessionIdArg: Fig.Arg = {
                 const list = JSON.parse(out) as Array<{
                     id: string
                     name: string
-                    repo: string
+                    repos: Array<{ ownerRepo: string }>
                     state: string
                 }>
                 // Show the readable label first, keep the (short) id as the
@@ -110,7 +110,7 @@ const sessionIdArg: Fig.Arg = {
                 // as the CLI arg via insertValue.
                 return list.map((s) => ({
                     name: s.id,
-                    displayName: `[${s.state}] ${s.name} (${s.repo})`,
+                    displayName: `[${s.state}] ${s.name} (${s.repos.map((r) => r.ownerRepo).join(", ")})`,
                     description: s.id,
                     insertValue: s.id,
                     priority: s.state === "awaiting-input" ? 100 : 80,

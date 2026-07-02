@@ -31,7 +31,7 @@ final class NotificationService {
 
         let content = UNMutableNotificationContent()
         content.title = title(for: newState, sessionName: session.name)
-        content.subtitle = session.repo
+        content.subtitle = session.repos.map { $0.ownerRepo }.joined(separator: ", ")
         content.body = body(for: newState)
         content.sound = .default
         content.userInfo = ["sessionId": session.id]

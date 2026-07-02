@@ -15,14 +15,9 @@ import { $ } from "bun"
 
 import { createAgentClone, pushBranchToMain } from "../agentClone.ts"
 import type { BaywatchConfig } from "../config.ts"
-import { findRepoPath } from "../prep.ts"
 import { prepRepo } from "../prep.ts"
-import {
-    findSession,
-    SESSIONS_ROOT,
-    type SessionMeta,
-    type SessionRow,
-} from "../sessionsState.ts"
+import { findSession, SESSIONS_ROOT, type SessionMeta, type SessionRepo, type SessionRow } from "../sessionsState.ts"
+import { findTask, readTask, writeTask } from "../tasksState.ts"
 
 const SANDBOX_IMAGE = "baywatch-agent"
 const IDENTITY_ROOT = path.join(homedir(), ".baywatch", "identity")
@@ -115,11 +110,7 @@ const IDENTITY_CLAUDE_JSON_OWNED_KEYS: ReadonlySet<string> = new Set([
 
 // Keys from host .claude.json that reference host paths or host-installed
 // resources — silently dropped so the container doesn't try to chase them.
-const HOST_CLAUDE_JSON_STRIP_KEYS: ReadonlySet<string> = new Set([
-    "projects",
-    "githubRepoPaths",
-    "todos",
-])
+const HOST_CLAUDE_JSON_STRIP_KEYS: ReadonlySet<string> = new Set(["projects", "githubRepoPaths", "todos"])
 
 // Builds a merged ~/.claude.json that takes the user's host preferences
 // (theme, copyOnSelect, tipsHistory, onboarding/hasUsed* flags, …) and layers
@@ -193,10 +184,7 @@ function encodeProjectDir(absPath: string): string {
 // claude writes. Returns its absolute path, or null on timeout. Used to drive
 // the resume-link symlink — we can't predict the session UUID up front, so we
 // wait for claude to pick one and write the first chunk.
-async function extractSessionJsonlPath(
-    hostProjectsDir: string,
-    timeoutMs: number
-): Promise<string | null> {
+async function extractSessionJsonlPath(hostProjectsDir: string, timeoutMs: number): Promise<string | null> {
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
         try {
@@ -220,8 +208,7 @@ async function extractRcUrl(containerName: string, timeoutMs: number): Promise<s
     // prints `claude.ai/code?environment=<env>`. Match either.
     const re = /https:\/\/claude\.ai\/code\/session_[\w-]+|https:\/\/claude\.ai\/code\?environment=[\w-]+/
     while (Date.now() < deadline) {
-        const r =
-            await $`podman exec ${containerName} tmux capture-pane -p -t claude`.nothrow().quiet()
+        const r = await $`podman exec ${containerName} tmux capture-pane -p -t claude`.nothrow().quiet()
         if (r.exitCode === 0) {
             const m = r.stdout.toString().match(re)
             if (m) return m[0]
@@ -231,13 +218,7 @@ async function extractRcUrl(containerName: string, timeoutMs: number): Promise<s
     return null
 }
 
-export async function runSession(opts: {
-    repo: string
-    name: string
-    config: BaywatchConfig
-}): Promise<SessionMeta> {
-    const { repo, name, config } = opts
-
+function assertIdentity(): void {
     if (!existsSync(IDENTITY_CREDS) || !existsSync(IDENTITY_CLAUDE_JSON)) {
         throw new Error(
             `Baywatch identity not set up — expected both:\n` +
@@ -246,8 +227,39 @@ export async function runSession(opts: {
                 `Run: baywatch session login`
         )
     }
+}
 
-    const id = shortId()
+// Each session gets its own clone-parent dir. It's identity-mounted into the
+// container as a single mount, so every repo clone under it is visible at the
+// same path host- and container-side — and a clone dropped in later (add repo
+// on the fly) appears live without recreating the container.
+function sessionCloneParent(id: string): string {
+    return path.join(homedir(), ".baywatch", "clones", id)
+}
+
+// A repo to bring into a session: cut a fresh branch off origin/<default>
+// (reuse=false), or continue an existing task branch already landed in the main
+// clone (reuse=true).
+type RepoPlan = {
+    ownerRepo: string
+    mainClonePath: string
+    branch: string
+    defaultBranch: string
+    reuse: boolean
+}
+
+// Spawn one container mounting every repo clone under a per-session parent, with
+// claude's cwd at the parent so it sees all repos at once. Writes meta.json and
+// returns it. The Task itself is written by the caller.
+async function spawnSession(opts: {
+    id: string
+    name: string
+    taskId: string
+    plans: RepoPlan[]
+}): Promise<SessionMeta> {
+    const { id, name, taskId, plans } = opts
+    if (plans.length === 0) throw new Error("a session needs at least one repo")
+
     const sessionDir = path.join(SESSIONS_ROOT, id)
     mkdirSync(sessionDir, { recursive: true })
 
@@ -255,22 +267,28 @@ export async function runSession(opts: {
     writeFileSync(settingsPath, buildSessionSettings())
     writeFileSync(path.join(sessionDir, "status.jsonl"), "")
 
-    const prep = await prepRepo({ ownerRepo: repo, config })
-    const branchName = `agent/session-${id}-${slugify(name)}`
-    const clone = await createAgentClone({
-        ownerRepo: repo,
-        mainClonePath: prep.repoPath,
-        branchName,
-        defaultBranch: prep.defaultBranch,
-    })
-
-    // Mount the clone at the same path inside the container as it has on host
-    // so the `cwd` claude records in its session JSONL matches a real host
-    // path. Combined with the per-session projects bind-mount below, this is
-    // what makes `claude --resume`, the VSCode extension's agents/sessions
-    // view, and any other discovery tool that scans `~/.claude/projects/`
-    // pick up baywatch sessions natively when opened at the clone path.
-    const containerWorkdir = clone.path
+    // Clone every repo into the session's parent dir. claude's cwd is the parent
+    // (mounted identity below), so each repo appears as a subdirectory and the
+    // `cwd` claude records in its transcript matches a real host path.
+    const containerWorkdir = sessionCloneParent(id)
+    mkdirSync(containerWorkdir, { recursive: true })
+    const sessionRepos: SessionRepo[] = []
+    for (const plan of plans) {
+        const clone = await createAgentClone({
+            ownerRepo: plan.ownerRepo,
+            mainClonePath: plan.mainClonePath,
+            branchName: plan.branch,
+            defaultBranch: plan.defaultBranch,
+            targetDir: containerWorkdir,
+            reuseBranch: plan.reuse,
+        })
+        sessionRepos.push({
+            ownerRepo: plan.ownerRepo,
+            branch: plan.branch,
+            clonePath: clone.path,
+            mainClonePath: plan.mainClonePath,
+        })
+    }
 
     const wrapperPath = path.join(sessionDir, "wrap.sh")
     writeFileSync(wrapperPath, buildSessionWrapper(name, containerWorkdir))
@@ -292,29 +310,43 @@ export async function runSession(opts: {
 
     const containerName = `baywatch-session-${id}`
     const runArgs: string[] = [
-        "podman", "run", "-d",
-        "--name", containerName,
-        "--hostname", `baywatch-${id}`,
+        "podman",
+        "run",
+        "-d",
+        "--name",
+        containerName,
+        "--hostname",
+        `baywatch-${id}`,
         // Map host UID → container UID 1000 so the agent user can read/write the
-        // bind-mounted clone, credentials, and per-session dir.
+        // bind-mounted clones, credentials, and per-session dir.
         "--userns=keep-id:uid=1000,gid=1000",
-        "-w", containerWorkdir,
+        "-w",
+        containerWorkdir,
         // Auth: bind-mount both the credentials file (refresh chain) and the
         // .claude.json sibling (org/account cache that Remote Control reads).
         // Both rw so token refreshes and cache updates persist back to host;
         // claude-code's lockfile-based config writer serialises concurrent
         // sessions.
-        "-v", `${IDENTITY_CREDS}:/home/agent/.claude/.credentials.json:rw`,
-        "-v", `${claudeJsonPath}:/home/agent/.claude.json:rw`,
-        "-v", `${sessionDir}:/home/agent/.baywatch/session:rw`,
-        "-v", `${settingsPath}:/home/agent/.claude/settings.json:ro`,
-        "-v", `${clone.path}:${containerWorkdir}:rw`,
+        "-v",
+        `${IDENTITY_CREDS}:/home/agent/.claude/.credentials.json:rw`,
+        "-v",
+        `${claudeJsonPath}:/home/agent/.claude.json:rw`,
+        "-v",
+        `${sessionDir}:/home/agent/.baywatch/session:rw`,
+        "-v",
+        `${settingsPath}:/home/agent/.claude/settings.json:ro`,
+        // One identity mount for the whole clone-parent: every repo clone under
+        // it is live, and a clone added later shows up without recreating.
+        "-v",
+        `${containerWorkdir}:${containerWorkdir}:rw`,
         // Bind-mount the session's per-cwd projects dir so claude's session
         // transcripts (JSONL) are written straight to the host. The encoded
-        // dirname includes the unique clone id, so concurrent sessions never
+        // dirname includes the unique session id, so concurrent sessions never
         // collide.
-        "-v", `${hostProjectsDir}:${containerProjectsDir}:rw`,
-        "-e", "CLAUDE_CODE_SANDBOXED=1",
+        "-v",
+        `${hostProjectsDir}:${containerProjectsDir}:rw`,
+        "-e",
+        "CLAUDE_CODE_SANDBOXED=1",
     ]
     // Inherit user-level claude state that's safe to share across containers:
     // CLAUDE.md (user rules), agents/ (custom subagents), skills/ (custom
@@ -362,46 +394,146 @@ export async function runSession(opts: {
         extractSessionJsonlPath(hostProjectsDir, 15_000),
     ])
 
-    // Drop a symlink in the main checkout's project dir pointing at the
-    // session transcript, so `claude --resume` from the user's normal repo
-    // (e.g. ~/Repos/Plugsoftware/plug-hub-ui) lists the baywatch session. The
-    // resume picker filters by encoded-cwd, and the transcript's recorded
-    // `cwd` is the clone path — without this symlink the session is only
-    // discoverable when launching claude from the clone path itself.
+    // Drop a resume symlink into each repo's main-clone project dir so
+    // `claude --resume` from any of the session's real checkouts lists it. The
+    // transcript's recorded `cwd` is the clone-parent, so without these links
+    // the session is only discoverable when launching claude from the parent.
     let resumeLinkPath: string | undefined
     if (jsonlPath) {
-        const mainProjectsDir = path.join(
-            homedir(),
-            ".claude",
-            "projects",
-            encodeProjectDir(prep.repoPath)
-        )
-        mkdirSync(mainProjectsDir, { recursive: true })
-        const candidate = path.join(mainProjectsDir, path.basename(jsonlPath))
-        try {
-            if (!existsSync(candidate)) symlinkSync(jsonlPath, candidate)
-            resumeLinkPath = candidate
-        } catch (err) {
-            console.warn(
-                `[session] could not create resume-link at ${candidate}: ${(err as Error).message}`
-            )
+        for (const repo of sessionRepos) {
+            const mainProjectsDir = path.join(homedir(), ".claude", "projects", encodeProjectDir(repo.mainClonePath))
+            mkdirSync(mainProjectsDir, { recursive: true })
+            const candidate = path.join(mainProjectsDir, path.basename(jsonlPath))
+            try {
+                if (!existsSync(candidate)) symlinkSync(jsonlPath, candidate)
+                resumeLinkPath ??= candidate
+            } catch (err) {
+                console.warn(`[session] could not create resume-link at ${candidate}: ${(err as Error).message}`)
+            }
         }
     }
 
     const meta: SessionMeta = {
         id,
+        taskId,
         name,
-        repo,
+        repos: sessionRepos,
         containerName,
         containerId,
-        branch: branchName,
-        clonePath: clone.path,
-        mainClonePath: prep.repoPath,
         startedAt: Date.now(),
         rcEnvironmentUrl: rcUrl,
         ...(resumeLinkPath ? { resumeLinkPath } : {}),
     }
     writeFileSync(path.join(sessionDir, "meta.json"), JSON.stringify(meta, null, 2))
+    return meta
+}
+
+// Start a new Task (fresh branches off origin/<default>) across one or more
+// repos, and run its first session.
+export async function runSession(opts: {
+    repos: string[]
+    name: string
+    config: BaywatchConfig
+}): Promise<SessionMeta> {
+    const { repos, name, config } = opts
+    if (repos.length === 0) throw new Error("a session needs at least one repo")
+    assertIdentity()
+
+    const id = shortId()
+    const branch = `agent/session-${id}-${slugify(name)}`
+    const plans: RepoPlan[] = []
+    for (const ownerRepo of repos) {
+        const prep = await prepRepo({ ownerRepo, config })
+        plans.push({
+            ownerRepo,
+            mainClonePath: prep.repoPath,
+            branch,
+            defaultBranch: prep.defaultBranch,
+            reuse: false,
+        })
+    }
+
+    const taskId = shortId()
+    writeTask({
+        id: taskId,
+        name,
+        repos: plans.map((p) => ({ ownerRepo: p.ownerRepo, branch: p.branch, mainClonePath: p.mainClonePath })),
+        createdAt: Date.now(),
+    })
+
+    return spawnSession({ id, name, taskId, plans })
+}
+
+// Reopen an existing Task in a fresh session: check out its branches (with the
+// commits already landed in the main clones) instead of cutting from default,
+// so you can continue a feature — or review it — the next day.
+export async function continueSession(opts: {
+    taskId: string
+    name?: string
+    config: BaywatchConfig
+}): Promise<SessionMeta> {
+    const { taskId, config } = opts
+    assertIdentity()
+
+    const task = findTask(taskId)
+    if (!task) throw new Error(`no task matching '${taskId}'`)
+    if (task.repos.length === 0) throw new Error(`task ${task.id} has no repos`)
+
+    const id = shortId()
+    const name = opts.name ?? task.name
+    const plans: RepoPlan[] = []
+    for (const r of task.repos) {
+        const prep = await prepRepo({ ownerRepo: r.ownerRepo, config })
+        plans.push({
+            ownerRepo: r.ownerRepo,
+            mainClonePath: prep.repoPath,
+            branch: r.branch,
+            defaultBranch: prep.defaultBranch,
+            reuse: true,
+        })
+    }
+
+    return spawnSession({ id, name, taskId: task.id, plans })
+}
+
+// Add a repo to a live session on the fly: clone it into the already-mounted
+// clone-parent (so it appears in the running container without a restart) and
+// record it on both the session and its Task.
+export async function addRepoToSession(opts: {
+    idOrName: string
+    ownerRepo: string
+    config: BaywatchConfig
+}): Promise<SessionMeta> {
+    const { idOrName, ownerRepo, config } = opts
+    const session = await findSession(idOrName)
+    if (!session) throw new Error(`No session matching '${idOrName}'`)
+    if (session.repos.some((r) => r.ownerRepo === ownerRepo)) {
+        throw new Error(`${ownerRepo} is already in session ${session.id}`)
+    }
+
+    const prep = await prepRepo({ ownerRepo, config })
+    // Keep every repo in the session on one branch name.
+    const branch = session.repos[0]?.branch ?? `agent/session-${session.id}-${slugify(session.name)}`
+    const clone = await createAgentClone({
+        ownerRepo,
+        mainClonePath: prep.repoPath,
+        branchName: branch,
+        defaultBranch: prep.defaultBranch,
+        targetDir: sessionCloneParent(session.id),
+        reuseBranch: false,
+    })
+
+    const metaPath = path.join(SESSIONS_ROOT, session.id, "meta.json")
+    const meta = JSON.parse(readFileSync(metaPath, "utf8")) as SessionMeta
+    meta.repos = [...meta.repos, { ownerRepo, branch, clonePath: clone.path, mainClonePath: prep.repoPath }]
+    writeFileSync(metaPath, JSON.stringify(meta, null, 2))
+
+    const task = readTask(session.taskId)
+    if (task && !task.repos.some((r) => r.ownerRepo === ownerRepo)) {
+        task.repos.push({ ownerRepo, branch, mainClonePath: prep.repoPath })
+        writeTask(task)
+    }
+
     return meta
 }
 
@@ -415,9 +547,7 @@ export async function attachSession(idOrName: string): Promise<never> {
         throw new Error(`session attach requires a TTY (this isn't one)`)
     }
 
-    const aliveCheck = await $`podman ps -q --filter name=${session.containerName}`
-        .nothrow()
-        .quiet()
+    const aliveCheck = await $`podman ps -q --filter name=${session.containerName}`.nothrow().quiet()
     if (!aliveCheck.stdout.toString().trim()) {
         throw new Error(
             `container ${session.containerName} is not running — restart with \`podman start ${session.containerName}\` or remove with \`baywatch session rm ${session.id}\``
@@ -428,10 +558,11 @@ export async function attachSession(idOrName: string): Promise<never> {
     // and the user's terminal owns the tmux session cleanly. execvp-style via
     // Bun.spawnSync wouldn't replace the process; node's process.exit after
     // proc.exited is the next best thing.
-    const proc = Bun.spawn(
-        ["podman", "exec", "-it", session.containerName, "tmux", "attach", "-t", "claude"],
-        { stdin: "inherit", stdout: "inherit", stderr: "inherit" }
-    )
+    const proc = Bun.spawn(["podman", "exec", "-it", session.containerName, "tmux", "attach", "-t", "claude"], {
+        stdin: "inherit",
+        stdout: "inherit",
+        stderr: "inherit",
+    })
     const code = await proc.exited
     process.exit(code)
 }
@@ -455,49 +586,30 @@ export async function removeSession(idOrName: string): Promise<SessionRow> {
     return session
 }
 
-// Mirrors what `baywatch dev`/`review` do at the end of their one-shot runs:
-// fetch the agent's branch from the agent-clone into the user's main clone so
-// the user can `git checkout <branch>` in their normal workspace. Best-effort
-// — never blocks stop/rm on a fetch failure.
-//
-// Old sessions (created before mainClonePath was stored in meta.json) fall
-// back to resolving the main clone via config.cloneRoots.
+// Fetch each repo's agent branch from its clone back into the user's real
+// checkout, so they can `git checkout <branch>` in their normal workspace.
+// Local ref fetch only — never a push, never touches the working tree.
+// Best-effort per repo — a fetch failure on one never blocks stop/rm.
 async function syncBranchToMainClone(session: SessionRow): Promise<void> {
-    let mainClonePath = session.mainClonePath
-    if (!mainClonePath) {
+    for (const repo of session.repos) {
         try {
-            const { loadConfig } = await import("../config.ts")
-            const config = await loadConfig()
-            const resolved = findRepoPath(session.repo, config.cloneRoots)
-            if (resolved) mainClonePath = resolved
-        } catch {
-            // fall through — we'll skip with a warning below
-        }
-    }
-    if (!mainClonePath) {
-        console.warn(
-            `[session] no main clone path recorded for ${session.id} (${session.repo}); ` +
-                `agent branch ${session.branch} stays at ${session.clonePath}`
-        )
-        return
-    }
-    try {
-        const result = await pushBranchToMain({
-            path: session.clonePath,
-            mainClonePath,
-            branch: session.branch,
-        })
-        if (result.synced) {
-            console.log(`[session] ${session.branch} fetched into ${mainClonePath}`)
-        } else {
-            console.log(
-                `[session] ${session.branch} had no commits beyond origin/HEAD — not bringing it into ${mainClonePath}`
+            const result = await pushBranchToMain({
+                path: repo.clonePath,
+                mainClonePath: repo.mainClonePath,
+                branch: repo.branch,
+            })
+            if (result.synced) {
+                console.log(`[session] ${repo.branch} fetched into ${repo.mainClonePath}`)
+            } else {
+                console.log(
+                    `[session] ${repo.branch} had no commits beyond origin/HEAD — not bringing it into ${repo.mainClonePath}`
+                )
+            }
+        } catch (err) {
+            console.warn(
+                `[session] could not sync ${repo.branch} back to ${repo.mainClonePath}: ${(err as Error).message}`
             )
         }
-    } catch (err) {
-        console.warn(
-            `[session] could not sync ${session.branch} back to ${mainClonePath}: ${(err as Error).message}`
-        )
     }
 }
 
@@ -542,12 +654,18 @@ export async function loginSession(opts: { force: boolean }): Promise<void> {
     await $`podman rm -f ${containerName}`.nothrow().quiet()
 
     const runArgs = [
-        "podman", "run", "-d",
-        "--name", containerName,
+        "podman",
+        "run",
+        "-d",
+        "--name",
+        containerName,
         "--userns=keep-id:uid=1000,gid=1000",
-        "-e", "CLAUDE_CODE_SANDBOXED=1",
-        "-v", `${IDENTITY_CREDS}:/home/agent/.claude/.credentials.json:rw`,
-        "-v", `${IDENTITY_CLAUDE_JSON}:/home/agent/.claude.json:rw`,
+        "-e",
+        "CLAUDE_CODE_SANDBOXED=1",
+        "-v",
+        `${IDENTITY_CREDS}:/home/agent/.claude/.credentials.json:rw`,
+        "-v",
+        `${IDENTITY_CLAUDE_JSON}:/home/agent/.claude.json:rw`,
         SANDBOX_IMAGE,
     ]
     const runProc = Bun.spawn(runArgs, { stdout: "pipe", stderr: "pipe" })
@@ -562,10 +680,11 @@ export async function loginSession(opts: { force: boolean }): Promise<void> {
     console.log(`  ${IDENTITY_CLAUDE_JSON}`)
     console.log()
 
-    const execProc = Bun.spawn(
-        ["podman", "exec", "-it", containerName, "claude", "auth", "login"],
-        { stdin: "inherit", stdout: "inherit", stderr: "inherit" }
-    )
+    const execProc = Bun.spawn(["podman", "exec", "-it", containerName, "claude", "auth", "login"], {
+        stdin: "inherit",
+        stdout: "inherit",
+        stderr: "inherit",
+    })
     const execExit = await execProc.exited
 
     await $`podman rm -f ${containerName}`.nothrow().quiet()

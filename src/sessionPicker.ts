@@ -149,7 +149,7 @@ export async function pickSession(config: BaywatchConfig): Promise<PickResult> {
         options: [
             ...sessions.map((s) => ({
                 value: { _: "session" as const, row: s },
-                label: `${ICON[s.state]}  ${s.name.padEnd(nameWidth)}  ${s.repo}`,
+                label: `${ICON[s.state]}  ${s.name.padEnd(nameWidth)}  ${s.repos.map((r) => r.ownerRepo).join(", ")}`,
                 hint: s.state,
             })),
             { value: { _: "new" as const }, label: "+ Start new session…" },
