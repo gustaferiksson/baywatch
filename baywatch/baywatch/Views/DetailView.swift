@@ -111,6 +111,7 @@ private struct LandingStrip: View {
     @State private var statuses: [String: PRStatus] = [:]
     @State private var busy: Set<String> = []
     @State private var error: String?
+    @State private var editing: EditingFile?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -129,6 +130,7 @@ private struct LandingStrip: View {
             }
         }
         .task(id: session.id) { await refreshStatuses() }
+        .sheet(item: $editing) { FileEditorSheet(path: $0.path) }
     }
 
     private func row(_ repo: SessionRepo) -> some View {
@@ -160,11 +162,16 @@ private struct LandingStrip: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Create a pull request on GitHub")
+                Button { chooseFile(repo) } label: {
+                    Image(systemName: "square.and.pencil")
+                }
+                .buttonStyle(.borderless)
+                .help("Edit a file in this repo (in-app)")
                 Button { openEditor(repo) } label: {
                     Image(systemName: "chevron.left.forwardslash.chevron.right")
                 }
                 .buttonStyle(.borderless)
-                .help("Open this clone in your editor")
+                .help("Open this clone in your external editor")
             }
         }
         .padding(.horizontal, 12)
@@ -207,6 +214,18 @@ private struct LandingStrip: View {
     private func openEditor(_ repo: SessionRepo) {
         let path = repo.clonePath
         Task.detached { GitService.openInEditor(path: path) }
+    }
+
+    private func chooseFile(_ repo: SessionRepo) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: repo.clonePath)
+        panel.prompt = "Edit"
+        if panel.runModal() == .OK, let url = panel.url {
+            editing = EditingFile(path: url.path)
+        }
     }
 }
 
