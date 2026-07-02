@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		4F5360F22FB5EDE80045A2FA /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 4F5360F12FB5EDE80045A2FA /* SwiftTerm */; };
+		4F89305F2FF6732400E54CEF /* CodeEditSourceEditor in Frameworks */ = {isa = PBXBuildFile; productRef = 4F89305E2FF6732400E54CEF /* CodeEditSourceEditor */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -28,6 +29,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				4F5360F22FB5EDE80045A2FA /* SwiftTerm in Frameworks */,
+				4F89305F2FF6732400E54CEF /* CodeEditSourceEditor in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -71,6 +73,7 @@
 			name = baywatch;
 			packageProductDependencies = (
 				4F5360F12FB5EDE80045A2FA /* SwiftTerm */,
+				4F89305E2FF6732400E54CEF /* CodeEditSourceEditor */,
 			);
 			productName = baywatch;
 			productReference = 4F5360AC2FB5E4790045A2FA /* baywatch.app */;
@@ -102,6 +105,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				4F5360F02FB5EDE80045A2FA /* XCRemoteSwiftPackageReference "SwiftTerm" */,
+				4F89305D2FF6732400E54CEF /* XCRemoteSwiftPackageReference "CodeEditSourceEditor" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 4F5360AD2FB5E4790045A2FA /* Products */;
@@ -350,6 +354,14 @@
 				revision = d024ed7136681d88d14ca2fd220d41f94cc8c547;
 			};
 		};
+		4F89305D2FF6732400E54CEF /* XCRemoteSwiftPackageReference "CodeEditSourceEditor" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/CodeEditApp/CodeEditSourceEditor.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.15.2;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -357,6 +369,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 4F5360F02FB5EDE80045A2FA /* XCRemoteSwiftPackageReference "SwiftTerm" */;
 			productName = SwiftTerm;
+		};
+		4F89305E2FF6732400E54CEF /* CodeEditSourceEditor */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4F89305D2FF6732400E54CEF /* XCRemoteSwiftPackageReference "CodeEditSourceEditor" */;
+			productName = CodeEditSourceEditor;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

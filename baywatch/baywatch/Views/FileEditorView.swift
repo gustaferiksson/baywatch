@@ -2,14 +2,17 @@
 //  FileEditorView.swift
 //  baywatch
 //
-//  Phase 2, increment 1: a minimal native in-app file editor. Edits land in the
-//  session's clone, which is identity-mounted into the container — so the agent
-//  sees your edits live and they fetch back with everything else. No syntax
-//  highlighting yet; that arrives with CodeEditSourceEditor + Tree-sitter.
+//  Phase 2, increment 2: in-app editor backed by CodeEditSourceEditor
+//  (Tree-sitter syntax highlighting + line numbers). Language is detected from
+//  the file path; the theme follows the app's light/dark appearance. Edits land
+//  in the session's clone, which is identity-mounted into the container — so the
+//  agent sees them live and they fetch back with everything else.
 //
 
 import SwiftUI
 import AppKit
+import CodeEditSourceEditor
+import CodeEditLanguages
 
 /// A file the user has opened for editing (wrapper so `.sheet(item:)` works).
 struct EditingFile: Identifiable {
@@ -17,53 +20,28 @@ struct EditingFile: Identifiable {
     let path: String
 }
 
-/// NSTextView-backed plain-text editor bound to a String. Monospaced, no rich
-/// text / auto-substitutions, undo enabled, non-wrapping (horizontal scroll).
-struct FileEditorView: NSViewRepresentable {
+/// Thin wrapper over CodeEditSourceEditor's `SourceEditor`, wired for a single
+/// file: language from the path, theme from the color scheme.
+private struct CodeEditor: View {
+    let path: String
     @Binding var text: String
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var editorState = SourceEditorState()
 
-    func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSTextView.scrollableTextView()
-        scroll.hasHorizontalScroller = true
-        guard let textView = scroll.documentView as? NSTextView else { return scroll }
-        textView.delegate = context.coordinator
-        textView.isRichText = false
-        textView.isAutomaticQuoteSubstitutionEnabled = false
-        textView.isAutomaticDashSubstitutionEnabled = false
-        textView.isAutomaticSpellingCorrectionEnabled = false
-        textView.isAutomaticTextReplacementEnabled = false
-        textView.allowsUndo = true
-        textView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        textView.textContainerInset = NSSize(width: 6, height: 8)
-        textView.isHorizontallyResizable = true
-        textView.textContainer?.widthTracksTextView = false
-        textView.textContainer?.containerSize = NSSize(
-            width: CGFloat.greatestFiniteMagnitude,
-            height: CGFloat.greatestFiniteMagnitude
+    var body: some View {
+        SourceEditor(
+            $text,
+            language: CodeLanguage.detectLanguageFrom(url: URL(fileURLWithPath: path)),
+            configuration: SourceEditorConfiguration(
+                appearance: .init(
+                    theme: colorScheme == .dark ? .baywatchDark : .baywatchLight,
+                    font: .monospacedSystemFont(ofSize: 12, weight: .regular),
+                    wrapLines: false,
+                    tabWidth: 4
+                )
+            ),
+            state: $editorState
         )
-        textView.string = text
-        return scroll
-    }
-
-    func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let textView = scroll.documentView as? NSTextView else { return }
-        // Only re-set when the binding changed from outside the editor. Edits
-        // made in the view set text == string already, so this never fires on
-        // the user's own typing (no cursor jump).
-        if textView.string != text {
-            textView.string = text
-        }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
-
-    final class Coordinator: NSObject, NSTextViewDelegate {
-        private let text: Binding<String>
-        init(text: Binding<String>) { self.text = text }
-        func textDidChange(_ notification: Notification) {
-            guard let textView = notification.object as? NSTextView else { return }
-            text.wrappedValue = textView.string
-        }
     }
 }
 
@@ -111,7 +89,7 @@ struct FileEditorSheet: View {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                FileEditorView(text: $text)
+                CodeEditor(path: path, text: $text)
             }
             if let saveError {
                 Text(saveError)
@@ -122,7 +100,7 @@ struct FileEditorSheet: View {
                     .padding(.vertical, 6)
             }
         }
-        .frame(width: 820, height: 620)
+        .frame(width: 900, height: 640)
         .onAppear(perform: load)
     }
 
@@ -145,5 +123,65 @@ struct FileEditorSheet: View {
         } catch {
             saveError = "Save failed: \(error.localizedDescription)"
         }
+    }
+}
+
+// MARK: - Theme
+
+private func hexColor(_ value: String) -> NSColor {
+    var string = value
+    if string.hasPrefix("#") { string.removeFirst() }
+    var rgb: UInt64 = 0
+    Scanner(string: string).scanHexInt64(&rgb)
+    return NSColor(
+        srgbRed: CGFloat((rgb & 0xFF0000) >> 16) / 255,
+        green: CGFloat((rgb & 0x00FF00) >> 8) / 255,
+        blue: CGFloat(rgb & 0x0000FF) / 255,
+        alpha: 1
+    )
+}
+
+// Xcode-flavored light/dark themes (adapted from CodeEditSourceEditor's example).
+extension EditorTheme {
+    static var baywatchLight: EditorTheme {
+        EditorTheme(
+            text: Attribute(color: hexColor("000000")),
+            insertionPoint: hexColor("000000"),
+            invisibles: Attribute(color: hexColor("D6D6D6")),
+            background: hexColor("FFFFFF"),
+            lineHighlight: hexColor("ECF5FF"),
+            selection: hexColor("B2D7FF"),
+            keywords: Attribute(color: hexColor("9B2393"), bold: true),
+            commands: Attribute(color: hexColor("326D74")),
+            types: Attribute(color: hexColor("0B4F79")),
+            attributes: Attribute(color: hexColor("815F03")),
+            variables: Attribute(color: hexColor("0F68A0")),
+            values: Attribute(color: hexColor("6C36A9")),
+            numbers: Attribute(color: hexColor("1C00CF")),
+            strings: Attribute(color: hexColor("C41A16")),
+            characters: Attribute(color: hexColor("1C00CF")),
+            comments: Attribute(color: hexColor("267507"))
+        )
+    }
+
+    static var baywatchDark: EditorTheme {
+        EditorTheme(
+            text: Attribute(color: hexColor("FFFFFF")),
+            insertionPoint: hexColor("007AFF"),
+            invisibles: Attribute(color: hexColor("53606E")),
+            background: hexColor("292A30"),
+            lineHighlight: hexColor("2F3239"),
+            selection: hexColor("646F83"),
+            keywords: Attribute(color: hexColor("FF7AB2"), bold: true),
+            commands: Attribute(color: hexColor("78C2B3")),
+            types: Attribute(color: hexColor("6BDFFF")),
+            attributes: Attribute(color: hexColor("CC9768")),
+            variables: Attribute(color: hexColor("4EB0CC")),
+            values: Attribute(color: hexColor("B281EB")),
+            numbers: Attribute(color: hexColor("D9C97C")),
+            strings: Attribute(color: hexColor("FF8170")),
+            characters: Attribute(color: hexColor("D9C97C")),
+            comments: Attribute(color: hexColor("7F8C98"))
+        )
     }
 }
