@@ -195,6 +195,7 @@ const runSessionCmd = async (argv: string[]): Promise<void> => {
 const runSessionNew = async (argv: string[]): Promise<void> => {
     const repos: string[] = []
     let name: string | null = null
+    let json = false
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i]
         if (a === "--name") {
@@ -202,6 +203,8 @@ const runSessionNew = async (argv: string[]): Promise<void> => {
             if (v === undefined) throw new Error("--name requires a value")
             name = v
             i++
+        } else if (a === "--json") {
+            json = true
         } else if (a === "-h" || a === "--help") {
             printHelpAndExit()
         } else if (a !== undefined && !a.startsWith("-")) {
@@ -216,6 +219,10 @@ const runSessionNew = async (argv: string[]): Promise<void> => {
     const firstName = repos[0]?.split("/")[1] ?? "session"
     const sessionName = name ?? `${firstName}-${Date.now().toString(36).slice(-4)}`
     const meta = await runSession({ repos, name: sessionName, config })
+    if (json) {
+        process.stdout.write(`${JSON.stringify(meta)}\n`)
+        return
+    }
     console.log(`✓ session ${meta.id} started`)
     console.log(`  name:      ${meta.name}`)
     for (const r of meta.repos) {

@@ -34,7 +34,7 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showNewSessionSheet) {
-            NewSessionSheet()
+            NewSessionSheet(onCreated: { selection = $0 })
         }
     }
 

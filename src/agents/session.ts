@@ -267,11 +267,13 @@ async function spawnSession(opts: {
     writeFileSync(settingsPath, buildSessionSettings())
     writeFileSync(path.join(sessionDir, "status.jsonl"), "")
 
-    // Clone every repo into the session's parent dir. claude's cwd is the parent
-    // (mounted identity below), so each repo appears as a subdirectory and the
-    // `cwd` claude records in its transcript matches a real host path.
-    const containerWorkdir = sessionCloneParent(id)
-    mkdirSync(containerWorkdir, { recursive: true })
+    // Clone every repo into a per-session parent dir. The parent is what gets
+    // identity-mounted (so a repo added on the fly shows up live), but claude's
+    // cwd is the single repo when there's only one — the agent lands *inside*
+    // the repo rather than in the parent — and the parent only when there are
+    // several.
+    const cloneParent = sessionCloneParent(id)
+    mkdirSync(cloneParent, { recursive: true })
     const sessionRepos: SessionRepo[] = []
     for (const plan of plans) {
         const clone = await createAgentClone({
@@ -279,7 +281,7 @@ async function spawnSession(opts: {
             mainClonePath: plan.mainClonePath,
             branchName: plan.branch,
             defaultBranch: plan.defaultBranch,
-            targetDir: containerWorkdir,
+            targetDir: cloneParent,
             reuseBranch: plan.reuse,
         })
         sessionRepos.push({
@@ -289,18 +291,20 @@ async function spawnSession(opts: {
             mainClonePath: plan.mainClonePath,
         })
     }
+    const firstRepo = sessionRepos[0]
+    const workdir = sessionRepos.length === 1 && firstRepo ? firstRepo.clonePath : cloneParent
 
     const wrapperPath = path.join(sessionDir, "wrap.sh")
-    writeFileSync(wrapperPath, buildSessionWrapper(name, containerWorkdir))
+    writeFileSync(wrapperPath, buildSessionWrapper(name, workdir))
     chmodSync(wrapperPath, 0o755)
 
     // Pre-create the host-side project dir so the bind-mount has somewhere to
     // land. Claude inside the container appends `<uuid>.jsonl` files here, and
     // because both sides share the same path encoding, host claude finds them
-    // under their natural location.
-    const hostProjectsDir = path.join(homedir(), ".claude", "projects", encodeProjectDir(containerWorkdir))
+    // under their natural location. Keyed on workdir (the recorded cwd).
+    const hostProjectsDir = path.join(homedir(), ".claude", "projects", encodeProjectDir(workdir))
     mkdirSync(hostProjectsDir, { recursive: true })
-    const containerProjectsDir = `/home/agent/.claude/projects/${encodeProjectDir(containerWorkdir)}`
+    const containerProjectsDir = `/home/agent/.claude/projects/${encodeProjectDir(workdir)}`
 
     // Per-session merged .claude.json — host prefs + identity auth. Mounted
     // instead of the identity file directly so parallel sessions can't race
@@ -321,7 +325,7 @@ async function spawnSession(opts: {
         // bind-mounted clones, credentials, and per-session dir.
         "--userns=keep-id:uid=1000,gid=1000",
         "-w",
-        containerWorkdir,
+        workdir,
         // Auth: bind-mount both the credentials file (refresh chain) and the
         // .claude.json sibling (org/account cache that Remote Control reads).
         // Both rw so token refreshes and cache updates persist back to host;
@@ -336,9 +340,10 @@ async function spawnSession(opts: {
         "-v",
         `${settingsPath}:/home/agent/.claude/settings.json:ro`,
         // One identity mount for the whole clone-parent: every repo clone under
-        // it is live, and a clone added later shows up without recreating.
+        // it is live (including workdir), and a clone added later shows up
+        // without recreating.
         "-v",
-        `${containerWorkdir}:${containerWorkdir}:rw`,
+        `${cloneParent}:${cloneParent}:rw`,
         // Bind-mount the session's per-cwd projects dir so claude's session
         // transcripts (JSONL) are written straight to the host. The encoded
         // dirname includes the unique session id, so concurrent sessions never
@@ -347,6 +352,12 @@ async function spawnSession(opts: {
         `${hostProjectsDir}:${containerProjectsDir}:rw`,
         "-e",
         "CLAUDE_CODE_SANDBOXED=1",
+        // A real terminal + truecolor so claude renders correct colours inside
+        // the container (empty TERM otherwise → the "set COLORTERM" tip).
+        "-e",
+        "TERM=xterm-256color",
+        "-e",
+        "COLORTERM=truecolor",
     ]
     // Inherit user-level claude state that's safe to share across containers:
     // CLAUDE.md (user rules), agents/ (custom subagents), skills/ (custom

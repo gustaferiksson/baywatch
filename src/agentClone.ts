@@ -41,7 +41,12 @@ export async function createAgentClone(opts: {
     const root = targetDir ?? CLONES_ROOT
     if (!existsSync(root)) mkdirSync(root, { recursive: true })
 
-    const dirname = `${flat(ownerRepo)}--${branchName.replace(/\//g, "_")}--${shortId()}`
+    // Under a per-session parent (targetDir) the parent dir is already unique, so
+    // give the clone a clean repo-named subdir — the agent's cwd then shows
+    // `amped/` rather than a mangled `owner--repo--branch--id` name. The flat
+    // legacy root still needs the unique name to avoid collisions.
+    const repoName = ownerRepo.split("/")[1] ?? flat(ownerRepo)
+    const dirname = targetDir ? repoName : `${flat(ownerRepo)}--${branchName.replace(/\//g, "_")}--${shortId()}`
     const clonePath = path.join(root, dirname)
 
     console.log(`[clone] cloning ${mainClonePath} → ${clonePath}`)

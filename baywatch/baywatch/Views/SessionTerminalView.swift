@@ -24,6 +24,9 @@ struct SessionTerminalView: NSViewRepresentable, Equatable {
     func makeNSView(context: Context) -> LocalProcessTerminalView {
         let view = LocalProcessTerminalView(frame: .zero)
         view.processDelegate = context.coordinator
+        // Explicit crisp monospaced font — SwiftTerm's default renders stretched
+        // / soft. Menlo is the classic Terminal.app face; fall back to SF Mono.
+        view.font = NSFont(name: "Menlo", size: 13) ?? .monospacedSystemFont(ofSize: 13, weight: .regular)
         startProcess(in: view)
         return view
     }

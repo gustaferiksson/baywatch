@@ -12,6 +12,8 @@ import SwiftUI
 import AppKit
 
 struct NewSessionSheet: View {
+    var onCreated: (String) -> Void = { _ in }
+
     @Environment(\.dismiss) private var dismiss
     @Environment(SessionStore.self) private var store
     @AppStorage(AppSettings.reposRootKey) private var reposRootPath = AppSettings.reposRootDefault
@@ -281,8 +283,9 @@ struct NewSessionSheet: View {
         defer { isCreating = false }
 
         do {
-            try await SessionActions.create(repos: repos, name: nil)
+            let id = try await SessionActions.create(repos: repos, name: nil)
             store.refresh()
+            onCreated(id)
             dismiss()
         } catch let failure as SessionActions.Failure {
             errorMessage = failure.message
