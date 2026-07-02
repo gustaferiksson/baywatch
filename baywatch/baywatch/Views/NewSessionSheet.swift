@@ -2,9 +2,10 @@
 //  NewSessionSheet.swift
 //  baywatch
 //
-//  Keyboard-first session creator. Single search field at top, filtered flat
-//  list of git repos below. Arrows navigate, Return creates, Escape cancels.
-//  Session name is auto-generated; rename in-place later if needed.
+//  Keyboard-first session creator. Search field at top, filtered flat list of
+//  git repos below. Arrows navigate, Tab toggles a repo into the selection
+//  (multi-repo task), Return creates, Escape cancels. With nothing explicitly
+//  selected, Return creates a single-repo session from the highlighted row.
 //
 
 import SwiftUI
@@ -17,6 +18,7 @@ struct NewSessionSheet: View {
 
     @State private var repos: [String] = []
     @State private var search: String = ""
+    @State private var selected: Set<String> = []
     @State private var highlightedIndex: Int = 0
     @State private var isCreating: Bool = false
     @State private var errorMessage: String?
@@ -28,7 +30,7 @@ struct NewSessionSheet: View {
         return repos.filter { $0.lowercased().contains(q) }
     }
 
-    private var selectedRepo: String? {
+    private var highlightedRepo: String? {
         let list = filteredRepos
         guard !list.isEmpty else { return nil }
         let index = min(max(0, highlightedIndex), list.count - 1)
@@ -39,10 +41,11 @@ struct NewSessionSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             searchField
             Divider()
+            if !selected.isEmpty { selectedStrip }
             list
             footer
         }
-        .frame(width: 520, height: 440)
+        .frame(width: 520, height: 460)
         .task(id: reposRootPath) { rediscover() }
         .onChange(of: search) { _, _ in highlightedIndex = 0 }
         .onAppear { searchFocused = true }
@@ -59,6 +62,7 @@ struct NewSessionSheet: View {
                 .focused($searchFocused)
                 .onKeyPress(.upArrow) { moveHighlight(-1); return .handled }
                 .onKeyPress(.downArrow) { moveHighlight(1); return .handled }
+                .onKeyPress(.tab) { toggleHighlighted(); return .handled }
                 .onKeyPress(.return) {
                     Task { await performCreate() }
                     return .handled
@@ -75,6 +79,28 @@ struct NewSessionSheet: View {
         .padding(.vertical, 12)
     }
 
+    private var selectedStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(selected.sorted(), id: \.self) { repo in
+                    HStack(spacing: 4) {
+                        Text(repo).font(.caption.monospaced())
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .onTapGesture { selected.remove(repo) }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.accentColor.opacity(0.15), in: Capsule())
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+        }
+        .frame(height: 36)
+    }
+
     private var list: some View {
         ScrollViewReader { scrollProxy in
             ScrollView {
@@ -87,7 +113,7 @@ struct NewSessionSheet: View {
                                 .id(repo)
                                 .onTapGesture {
                                     highlightedIndex = index
-                                    Task { await performCreate() }
+                                    toggleHighlighted()
                                 }
                         }
                     }
@@ -105,15 +131,16 @@ struct NewSessionSheet: View {
     }
 
     private func row(_ repo: String, isHighlighted: Bool) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "arrow.triangle.branch")
-                .foregroundStyle(isHighlighted ? Color.white : Color.accentColor)
+        let isSelected = selected.contains(repo)
+        return HStack(spacing: 10) {
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(isHighlighted ? Color.white : (isSelected ? Color.accentColor : Color.secondary.opacity(0.4)))
             Text(repo)
                 .font(.system(.body, design: .monospaced))
                 .foregroundStyle(isHighlighted ? Color.white : Color.primary)
             Spacer(minLength: 0)
             if isHighlighted {
-                Text("↩")
+                Text(isSelected ? "tab" : "↩")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.7))
             }
@@ -165,7 +192,8 @@ struct NewSessionSheet: View {
                         .controlSize(.small)
                 }
                 Spacer(minLength: 6)
-                Text("↑↓ navigate · ↩ create · esc cancel")
+                Text(selected.isEmpty ? "↑↓ navigate · tab select · ↩ create · esc cancel"
+                                       : "↩ create \(selected.count) repos · tab toggle · esc cancel")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -186,6 +214,15 @@ struct NewSessionSheet: View {
         let count = filteredRepos.count
         guard count > 0 else { return }
         highlightedIndex = max(0, min(count - 1, highlightedIndex + delta))
+    }
+
+    private func toggleHighlighted() {
+        guard let repo = highlightedRepo else { return }
+        if selected.contains(repo) {
+            selected.remove(repo)
+        } else {
+            selected.insert(repo)
+        }
     }
 
     private func rediscover() {
@@ -225,13 +262,17 @@ struct NewSessionSheet: View {
     }
 
     private func performCreate() async {
-        guard let repo = selectedRepo, !isCreating else { return }
+        var repos = selected.sorted()
+        if repos.isEmpty, let highlighted = highlightedRepo {
+            repos = [highlighted]
+        }
+        guard !repos.isEmpty, !isCreating else { return }
         errorMessage = nil
         isCreating = true
         defer { isCreating = false }
 
         do {
-            try await SessionActions.create(repo: repo, name: nil)
+            try await SessionActions.create(repos: repos, name: nil)
             store.refresh()
             dismiss()
         } catch let failure as SessionActions.Failure {

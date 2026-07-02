@@ -23,15 +23,25 @@ enum SessionActions {
         try await runDetached(["session", "rm", sessionId])
     }
 
-    /// Spawns a new sandboxed session. Typical wall-clock: 3–8s (clone +
-    /// container start + RC registration).
-    static func create(repo: String, name: String?) async throws {
-        var args = ["session", "new", repo]
+    /// Spawns a new sandboxed session across one or more repos (a new task).
+    /// Typical wall-clock: 3–8s per repo (clone + container start + RC).
+    static func create(repos: [String], name: String?) async throws {
+        var args = ["session", "new"] + repos
         if let name, !name.isEmpty {
             args.append("--name")
             args.append(name)
         }
         try await runDetached(args)
+    }
+
+    /// Reopen an existing task's branches (with their commits) in a fresh session.
+    static func continueTask(taskId: String) async throws {
+        try await runDetached(["session", "continue", taskId])
+    }
+
+    /// Add a repo to a live session — appears in the container without a restart.
+    static func addRepo(sessionId: String, repo: String) async throws {
+        try await runDetached(["session", "add-repo", sessionId, repo])
     }
 
     private static func runDetached(_ args: [String]) async throws {
