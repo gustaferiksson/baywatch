@@ -24,7 +24,10 @@ struct NewSessionSheet: View {
     @State private var highlightedIndex: Int = 0
     @State private var isCreating: Bool = false
     @State private var errorMessage: String?
-    @FocusState private var searchFocused: Bool
+    @State private var sessionName: String = ""
+    @FocusState private var focus: Field?
+
+    private enum Field { case name, search }
 
     private var filteredRepos: [String] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -41,6 +44,8 @@ struct NewSessionSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            nameField
+            Divider()
             searchField
             Divider()
             if !selected.isEmpty { selectedStrip }
@@ -48,10 +53,38 @@ struct NewSessionSheet: View {
             if let errorMessage { errorBanner(errorMessage) }
             footer
         }
-        .frame(width: 520, height: 460)
+        .frame(width: 520, height: 500)
+        .background(createShortcut)
         .task(id: reposRootPath) { rediscover() }
         .onChange(of: search) { _, _ in highlightedIndex = 0 }
-        .onAppear { searchFocused = true }
+        .onAppear { focus = .search }
+    }
+
+    // ⌘↩ from anywhere in the sheet (incl. the name field) creates the session.
+    private var createShortcut: some View {
+        Button("Create Session") { Task { await performCreate() } }
+            .keyboardShortcut(.return, modifiers: [.command])
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+    }
+
+    private var nameField: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "pencil.line")
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+            TextField("Session name (optional — auto-generated if blank)", text: $sessionName)
+                .textFieldStyle(.plain)
+                .font(.title3)
+                .focused($focus, equals: .name)
+                .onKeyPress(.escape) {
+                    if !isCreating { dismiss() }
+                    return .handled
+                }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 
     private var searchField: some View {
@@ -62,12 +95,14 @@ struct NewSessionSheet: View {
             TextField("Search repos…", text: $search)
                 .textFieldStyle(.plain)
                 .font(.title3)
-                .focused($searchFocused)
+                .focused($focus, equals: .search)
                 .onKeyPress(.upArrow) { moveHighlight(-1); return .handled }
                 .onKeyPress(.downArrow) { moveHighlight(1); return .handled }
                 .onKeyPress(.tab) { toggleHighlighted(); return .handled }
-                .onKeyPress(.return) {
-                    Task { await performCreate() }
+                .onKeyPress(keys: [.return]) { press in
+                    // ⌘↩ falls through to the Create shortcut; plain ↩ selects.
+                    if press.modifiers.contains(.command) { return .ignored }
+                    toggleHighlighted()
                     return .handled
                 }
                 .onKeyPress(.escape) {
@@ -143,7 +178,7 @@ struct NewSessionSheet: View {
                 .foregroundStyle(isHighlighted ? Color.white : Color.primary)
             Spacer(minLength: 0)
             if isHighlighted {
-                Text(isSelected ? "tab" : "↩")
+                Text("↩")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.7))
             }
@@ -184,8 +219,8 @@ struct NewSessionSheet: View {
                     .buttonStyle(.borderless)
                     .controlSize(.small)
                 Spacer(minLength: 6)
-                Text(selected.isEmpty ? "↑↓ navigate · tab select · ↩ create · esc cancel"
-                                       : "↩ create \(selected.count) repos · tab toggle · esc cancel")
+                Text(selected.isEmpty ? "↑↓ navigate · ↩ select · ⌘↩ create · esc cancel"
+                                       : "⌘↩ create \(selected.count) · ↩ toggle · esc cancel")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -278,12 +313,13 @@ struct NewSessionSheet: View {
             repos = [highlighted]
         }
         guard !repos.isEmpty, !isCreating else { return }
+        let trimmedName = sessionName.trimmingCharacters(in: .whitespacesAndNewlines)
         errorMessage = nil
         isCreating = true
         defer { isCreating = false }
 
         do {
-            let id = try await SessionActions.create(repos: repos, name: nil)
+            let id = try await SessionActions.create(repos: repos, name: trimmedName.isEmpty ? nil : trimmedName)
             store.refresh()
             onCreated(id)
             dismiss()

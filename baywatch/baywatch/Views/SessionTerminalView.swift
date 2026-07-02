@@ -16,6 +16,8 @@ import SwiftTerm
 
 struct SessionTerminalView: NSViewRepresentable, Equatable {
     let containerName: String
+    @AppStorage(AppSettings.fontNameKey) private var fontName = AppSettings.fontNameDefault
+    @AppStorage(AppSettings.fontSizeKey) private var fontSize = AppSettings.fontSizeDefault
 
     static func == (lhs: SessionTerminalView, rhs: SessionTerminalView) -> Bool {
         lhs.containerName == rhs.containerName
@@ -24,9 +26,9 @@ struct SessionTerminalView: NSViewRepresentable, Equatable {
     func makeNSView(context: Context) -> LocalProcessTerminalView {
         let view = LocalProcessTerminalView(frame: .zero)
         view.processDelegate = context.coordinator
-        // Explicit crisp monospaced font — SwiftTerm's default renders stretched
-        // / soft. Menlo is the classic Terminal.app face; fall back to SF Mono.
-        view.font = NSFont(name: "Menlo", size: 13) ?? .monospacedSystemFont(ofSize: 13, weight: .regular)
+        // Explicit crisp monospaced font (SwiftTerm's default renders stretched
+        // / soft). User-configurable in Settings; falls back to the system mono.
+        view.font = AppSettings.monospaceFont(name: fontName, size: fontSize)
         startProcess(in: view)
         return view
     }

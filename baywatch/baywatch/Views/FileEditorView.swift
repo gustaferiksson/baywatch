@@ -26,6 +26,8 @@ private struct CodeEditor: View {
     let path: String
     @Binding var text: String
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage(AppSettings.fontNameKey) private var fontName = AppSettings.fontNameDefault
+    @AppStorage(AppSettings.fontSizeKey) private var fontSize = AppSettings.fontSizeDefault
     @State private var editorState = SourceEditorState()
 
     var body: some View {
@@ -35,7 +37,7 @@ private struct CodeEditor: View {
             configuration: SourceEditorConfiguration(
                 appearance: .init(
                     theme: colorScheme == .dark ? .baywatchDark : .baywatchLight,
-                    font: .monospacedSystemFont(ofSize: 12, weight: .regular),
+                    font: AppSettings.monospaceFont(name: fontName, size: fontSize),
                     wrapLines: false,
                     tabWidth: 4
                 )
