@@ -48,7 +48,7 @@ struct NewSessionSheet: View {
             Divider()
             searchField
             Divider()
-            if !selected.isEmpty { selectedStrip }
+            selectedStrip
             list
             if let errorMessage { errorBanner(errorMessage) }
             footer
@@ -117,24 +117,37 @@ struct NewSessionSheet: View {
         .padding(.vertical, 12)
     }
 
+    // Always rendered (fixed height) so the list doesn't jump when the first
+    // repo is selected; shows a hint when empty.
     private var selectedStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(selected.sorted(), id: \.self) { repo in
-                    HStack(spacing: 4) {
-                        Text(repo).font(.caption.monospaced())
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .onTapGesture { selected.remove(repo) }
+        Group {
+            if selected.isEmpty {
+                HStack {
+                    Text("Selected repos appear here — ↩ to add · ⌘↩ to create")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 14)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(selected.sorted(), id: \.self) { repo in
+                            HStack(spacing: 4) {
+                                Text(repo).font(.caption.monospaced())
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .onTapGesture { selected.remove(repo) }
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.accentColor.opacity(0.15), in: Capsule())
+                        }
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.accentColor.opacity(0.15), in: Capsule())
+                    .padding(.horizontal, 14)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
         }
         .frame(height: 36)
     }
