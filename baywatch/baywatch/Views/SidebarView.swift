@@ -19,15 +19,21 @@ struct SidebarView: View {
 
     var body: some View {
         List(selection: $selection) {
-            Section("Sessions") {
-                if store.sessions.isEmpty {
+            if store.groups.isEmpty {
+                Section("Tasks") {
                     emptyState
                         .listRowSeparator(.hidden)
-                } else {
-                    ForEach(store.sessions) { session in
-                        SessionRow(session: session)
-                            .tag(session.id)
-                            .contextMenu { contextMenu(for: session) }
+                }
+            } else {
+                ForEach(store.groups) { group in
+                    Section {
+                        ForEach(group.sessions) { session in
+                            SessionRow(session: session)
+                                .tag(session.id)
+                                .contextMenu { contextMenu(for: session) }
+                        }
+                    } header: {
+                        TaskHeader(group: group)
                     }
                 }
             }
@@ -171,6 +177,25 @@ struct SidebarView: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(.vertical, 8)
+    }
+}
+
+private struct TaskHeader: View {
+    let group: SessionGroup
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(group.taskName)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+            if !group.repoSummary.isEmpty {
+                Text(group.repoSummary)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
     }
 }
 

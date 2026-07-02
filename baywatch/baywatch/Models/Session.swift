@@ -82,3 +82,20 @@ struct Session: Identifiable, Hashable {
 
     var id: String { meta.id }
 }
+
+// One repo in a Task — mirrors the CLI's TaskRepo.
+struct TaskRepo: Codable, Hashable {
+    let ownerRepo: String
+    let branch: String
+    let mainClonePath: String
+}
+
+/// The durable {repo → branch} bundle a session runs against. Written by the CLI
+/// to ~/.baywatch/tasks/<id>/task.json. Multiple sessions can share one Task.
+struct TaskMeta: Codable, Hashable, Identifiable {
+    let id: String
+    let name: String
+    let query: String?
+    let repos: [TaskRepo]
+    let createdAt: Int
+}

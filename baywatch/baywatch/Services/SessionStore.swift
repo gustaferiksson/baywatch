@@ -2,9 +2,9 @@
 //  SessionStore.swift
 //  baywatch
 //
-//  Discovers sessions on disk and polls hook events + podman state to derive
-//  the runtime state for each. Pure read side — never writes anything; the
-//  baywatch CLI owns mutations.
+//  Discovers sessions + tasks on disk and polls hook events + podman state to
+//  derive the runtime state for each. Sessions are grouped under their Task for
+//  the two-level sidebar. Pure read side — never writes; the CLI owns mutations.
 //
 //  Disk + subprocess work runs on a detached task; only the final state
 //  assignment hops back to the main actor. This keeps the polling loop from
@@ -14,10 +14,20 @@
 import Foundation
 import Observation
 
+// A Task and the sessions that are runs of it — the sidebar's top level.
+struct SessionGroup: Identifiable {
+    let id: String        // taskId
+    let taskName: String
+    let repoSummary: String
+    let sessions: [Session]
+}
+
 @Observable
 @MainActor
 final class SessionStore {
     private(set) var sessions: [Session] = []
+    private(set) var tasks: [TaskMeta] = []
+    private(set) var groups: [SessionGroup] = []
     private(set) var lastError: String?
 
     private var timer: Timer?
@@ -57,7 +67,9 @@ final class SessionStore {
             }
             return lhs.lastEventAt > rhs.lastEventAt
         }
+        tasks = result.tasks
         lastError = result.error
+        rebuildGroups()
 
         // Fire notifications for transitions detected this tick.
         for session in sessions {
@@ -76,6 +88,27 @@ final class SessionStore {
 
         refreshTask = nil
     }
+
+    // Group the (already attention-sorted) sessions under their Task. First-seen
+    // order over the sorted sessions floats attention-grabbing tasks up. A task
+    // whose task.json is missing falls back to its first session's details.
+    private func rebuildGroups() {
+        let tasksById = Dictionary(tasks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var order: [String] = []
+        var byTask: [String: [Session]] = [:]
+        for session in sessions {
+            let key = session.meta.taskId
+            if byTask[key] == nil { order.append(key) }
+            byTask[key, default: []].append(session)
+        }
+        groups = order.map { key in
+            let sess = byTask[key] ?? []
+            let task = tasksById[key]
+            let name = task?.name ?? sess.first?.meta.name ?? key
+            let repos = task?.repos.map { $0.ownerRepo } ?? sess.first?.meta.repos.map { $0.ownerRepo } ?? []
+            return SessionGroup(id: key, taskName: name, repoSummary: repos.joined(separator: ", "), sessions: sess)
+        }
+    }
 }
 
 /// Pure scan logic, callable off the main actor. No SwiftUI / Observable state
@@ -83,6 +116,7 @@ final class SessionStore {
 enum SessionStoreScanner {
     struct ScanResult {
         let sessions: [Session]
+        let tasks: [TaskMeta]
         let error: String?
     }
 
@@ -92,7 +126,7 @@ enum SessionStoreScanner {
             .appendingPathComponent(".baywatch/sessions")
 
         guard fm.fileExists(atPath: root.path) else {
-            return ScanResult(sessions: [], error: nil)
+            return ScanResult(sessions: [], tasks: scanTasks(), error: nil)
         }
 
         let directories: [URL]
@@ -103,7 +137,7 @@ enum SessionStoreScanner {
                 options: [.skipsHiddenFiles]
             )
         } catch {
-            return ScanResult(sessions: [], error: "Failed to list \(root.path): \(error.localizedDescription)")
+            return ScanResult(sessions: [], tasks: scanTasks(), error: "Failed to list \(root.path): \(error.localizedDescription)")
         }
 
         let liveContainerIds = currentLiveContainerIds()
@@ -119,7 +153,7 @@ enum SessionStoreScanner {
             let lastTs = events.last?.ts ?? meta.startedAt
             out.append(Session(meta: meta, state: state, lastEventAt: lastTs))
         }
-        return ScanResult(sessions: out, error: nil)
+        return ScanResult(sessions: out, tasks: scanTasks(), error: nil)
     }
 
     // MARK: - file parsing
@@ -128,6 +162,27 @@ enum SessionStoreScanner {
         let metaPath = dir.appendingPathComponent("meta.json")
         guard let data = try? Data(contentsOf: metaPath) else { return nil }
         return try? JSONDecoder().decode(SessionMeta.self, from: data)
+    }
+
+    private static func scanTasks() -> [TaskMeta] {
+        let fm = FileManager.default
+        let root = fm.homeDirectoryForCurrentUser.appendingPathComponent(".baywatch/tasks")
+        guard fm.fileExists(atPath: root.path),
+              let dirs = try? fm.contentsOfDirectory(
+                  at: root,
+                  includingPropertiesForKeys: [.isDirectoryKey],
+                  options: [.skipsHiddenFiles]
+              )
+        else { return [] }
+        var out: [TaskMeta] = []
+        for dir in dirs {
+            let p = dir.appendingPathComponent("task.json")
+            guard let data = try? Data(contentsOf: p),
+                  let task = try? JSONDecoder().decode(TaskMeta.self, from: data)
+            else { continue }
+            out.append(task)
+        }
+        return out
     }
 
     private static func readEvents(in dir: URL) -> [HookEvent] {
