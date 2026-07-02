@@ -47,10 +47,11 @@ enum SessionState: String, Codable, Hashable {
 /// Persisted metadata for a baywatch session. Written by the CLI's
 /// `runSession` to ~/.baywatch/sessions/<id>/meta.json.
 /// One repo within a session's sandbox — mirrors the CLI's SessionRepo.
-struct SessionRepo: Codable, Hashable {
+struct SessionRepo: Codable, Hashable, Sendable {
     let ownerRepo: String
     let branch: String
     let clonePath: String
+    let mainClonePath: String
 }
 
 struct SessionMeta: Codable, Hashable, Identifiable {
